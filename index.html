@@ -435,6 +435,7 @@
               </div>
               <div class="full" style="display:flex;gap:10px;">
                 <button class="btn primary" id="btnGhConnect">Connecter</button>
+                <button class="btn" id="btnGhReload">Recharger maintenant</button>
                 <button class="btn" id="btnGhDisconnect">Déconnecter</button>
               </div>
             </div>
@@ -578,6 +579,40 @@ async function ghApiFetch(method, body){
   return fetch(url, opts);
 }
 
+/* recharge l'état depuis GitHub (sha inchangé = pas de conflit possible en lecture).
+   silent=true : pas de toast si rien de neuf (utilisé pour les vérifications
+   automatiques en arrière-plan). */
+async function ghLoadNow(silent){
+  if(!ghConfig) return;
+  try{
+    const res = await ghApiFetch('GET');
+    if(!res.ok){
+      const body = await res.json().catch(()=>({}));
+      throw new Error(res.status + (body.message ? " — "+body.message : ""));
+    }
+    const data = await res.json();
+    if(data.sha === ghSha){
+      // rien de nouveau côté GitHub
+      if(!silent) toast("Déjà à jour");
+      return;
+    }
+    ghSha = data.sha;
+    const decoded = base64ToUtf8(data.content.replace(/\n/g,'')).trim();
+    if(decoded){
+      const loaded = JSON.parse(decoded);
+      state = normalizeState(loaded);
+      if(dirHandle) await refreshFieldsFromFolder(false);
+      renderAll();
+    }
+    document.getElementById('ghSyncStatus').textContent = "Rechargé depuis GitHub : "+new Date().toLocaleTimeString('fr-FR')
+      +" — "+Object.keys(state.fields).length+" champ(s), "+state.interventions.length+" intervention(s)";
+    if(!silent) toast("Données rechargées depuis GitHub");
+  }catch(e){
+    console.error("Erreur de rechargement GitHub", e);
+    if(!silent) toast("Rechargement GitHub impossible : " + (e.message || e));
+  }
+}
+
 async function connectGithub(){
   const repo = document.getElementById('ghRepo').value.trim();
   const path = document.getElementById('ghPath').value.trim() || 'carnet-donnees.json';
@@ -601,6 +636,7 @@ async function connectGithub(){
       await ghSaveNow();
       saveGhConfig(ghConfig);
       updateGithubUI(true);
+      startGhAutoRefresh();
       toast("Connecté à GitHub — fichier de données créé");
       return;
     }
@@ -622,6 +658,7 @@ async function connectGithub(){
       await ghSaveNow();
       saveGhConfig(ghConfig);
       updateGithubUI(true);
+      startGhAutoRefresh();
       toast("Fichier GitHub vide — initialisé avec les données actuelles");
       return;
     }
@@ -631,6 +668,7 @@ async function connectGithub(){
     renderAll();
     saveGhConfig(ghConfig);
     updateGithubUI(true);
+    startGhAutoRefresh();
     document.getElementById('ghSyncStatus').textContent = "Chargé depuis GitHub : "+Object.keys(state.fields).length+" champ(s), "+state.interventions.length+" intervention(s)";
     toast("Données chargées depuis GitHub");
   }catch(e){
@@ -692,6 +730,14 @@ function scheduleGhSave(){
   ghSaveTimer = setTimeout(ghSaveNow, 800);
 }
 
+let ghAutoRefreshTimer = null;
+function startGhAutoRefresh(){
+  clearInterval(ghAutoRefreshTimer);
+  ghAutoRefreshTimer = setInterval(()=>{
+    if(ghConfig) ghLoadNow(true);
+  }, 45000);
+}
+
 async function tryRestoreGithub(){
   const cfg = loadGhConfig();
   if(!cfg) return;
@@ -710,12 +756,14 @@ async function tryRestoreGithub(){
     const decoded = base64ToUtf8(data.content.replace(/\n/g,'')).trim();
     if(!decoded){
       updateGithubUI(true);
+      startGhAutoRefresh();
       return;
     }
     const loaded = JSON.parse(decoded);
     state = normalizeState(loaded);
     renderAll();
     updateGithubUI(true);
+    startGhAutoRefresh();
   }catch(e){
     console.error("Reconnexion GitHub échouée", e);
     toast("Reconnexion GitHub échouée : " + (e.message || e));
@@ -1040,8 +1088,9 @@ function startFolderAutoRefresh(){
 // re-scan aussi quand l'onglet redevient visible (l'appli tourne en tâche de
 // fond entre-temps, un setInterval seul peut être mis en pause par le navigateur)
 document.addEventListener('visibilitychange', ()=>{
-  if(document.visibilityState === 'visible' && dirHandle){
-    refreshFieldsFromFolder(false);
+  if(document.visibilityState === 'visible'){
+    if(dirHandle) refreshFieldsFromFolder(false);
+    if(ghConfig) ghLoadNow(true);
   }
 });
 
@@ -1489,6 +1538,7 @@ document.getElementById('btnGoToGithub').addEventListener('click', ()=>{
   document.getElementById('ghRepo').scrollIntoView({behavior:'smooth', block:'center'});
 });
 document.getElementById('btnGhConnect').addEventListener('click', connectGithub);
+document.getElementById('btnGhReload').addEventListener('click', ()=>ghLoadNow(false));
 document.getElementById('btnGhDisconnect').addEventListener('click', disconnectGithub);
 document.getElementById('btnToggleGhToken').addEventListener('click', ()=>{
   const inp = document.getElementById('ghToken');
