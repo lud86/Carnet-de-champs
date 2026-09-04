@@ -428,7 +428,10 @@
               </div>
               <div class="full">
                 <label class="field-label">Jeton d'accès personnel (Personal Access Token)</label>
-                <input type="password" id="ghToken" placeholder="ghp_...">
+                <div style="display:flex;gap:8px;">
+                  <input type="password" id="ghToken" placeholder="ghp_..." autocomplete="off" style="flex:1;">
+                  <button type="button" class="btn small" id="btnToggleGhToken">Afficher</button>
+                </div>
               </div>
               <div class="full" style="display:flex;gap:10px;">
                 <button class="btn primary" id="btnGhConnect">Connecter</button>
@@ -1429,6 +1432,12 @@ document.getElementById('btnGoToGithub').addEventListener('click', ()=>{
 });
 document.getElementById('btnGhConnect').addEventListener('click', connectGithub);
 document.getElementById('btnGhDisconnect').addEventListener('click', disconnectGithub);
+document.getElementById('btnToggleGhToken').addEventListener('click', ()=>{
+  const inp = document.getElementById('ghToken');
+  const btn = document.getElementById('btnToggleGhToken');
+  if(inp.type === 'password'){ inp.type = 'text'; btn.textContent = 'Masquer'; }
+  else { inp.type = 'password'; btn.textContent = 'Afficher'; }
+});
 
 document.getElementById('btnImportKmlManual').addEventListener('click', ()=>{
   document.getElementById('fileKmlInput').click();
