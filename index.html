@@ -615,7 +615,16 @@ async function connectGithub(){
     }
     const data = await res.json();
     ghSha = data.sha;
-    const loaded = JSON.parse(base64ToUtf8(data.content.replace(/\n/g,'')));
+    const decoded = base64ToUtf8(data.content.replace(/\n/g,'')).trim();
+    if(!decoded){
+      // fichier existant mais vide : on l'initialise avec l'état actuel
+      await ghSaveNow();
+      saveGhConfig(ghConfig);
+      updateGithubUI(true);
+      toast("Fichier GitHub vide — initialisé avec les données actuelles");
+      return;
+    }
+    const loaded = JSON.parse(decoded);
     state = normalizeState(loaded);
     renderAll();
     saveGhConfig(ghConfig);
@@ -678,7 +687,12 @@ async function tryRestoreGithub(){
     }
     const data = await res.json();
     ghSha = data.sha;
-    const loaded = JSON.parse(base64ToUtf8(data.content.replace(/\n/g,'')));
+    const decoded = base64ToUtf8(data.content.replace(/\n/g,'')).trim();
+    if(!decoded){
+      updateGithubUI(true);
+      return;
+    }
+    const loaded = JSON.parse(decoded);
     state = normalizeState(loaded);
     renderAll();
     updateGithubUI(true);
