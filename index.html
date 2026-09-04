@@ -1,0 +1,1380 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Carnet de Champs — Traçabilité parcellaire</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/msal-browser/3.7.1/msal-browser.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f4f3ec;
+    --panel:#ffffff;
+    --ink:#22261e;
+    --muted:#6f7566;
+    --line:#dbd8c8;
+    --line-strong:#c7c3ae;
+    --green:#33503a;
+    --green-dark:#20301f;
+    --green-wash:#e8ede2;
+    --clay:#a15c2e;
+    --clay-dark:#83491f;
+    --clay-wash:#f2e3d2;
+    --danger:#a1402e;
+    --radius:3px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'Inter',system-ui,sans-serif;
+    font-size:14.5px;
+    line-height:1.5;
+  }
+  h1,h2,h3{font-family:'Fraunces',serif;font-weight:600;margin:0;}
+  button{font-family:inherit;}
+  ::selection{background:var(--clay-wash);}
+
+  /* ---- layout shell ---- */
+  #app{display:flex;flex-direction:column;min-height:100vh;}
+
+  header.top{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:14px 22px;
+    background:var(--green-dark);
+    color:#f4f3ec;
+    border-bottom:3px solid var(--clay);
+  }
+  header.top .brand{display:flex;align-items:baseline;gap:10px;}
+  header.top h1{font-size:20px;letter-spacing:.2px;color:#fbfaf5;}
+  header.top .tagline{font-size:12px;color:#c9d1c1;font-style:italic;}
+  .conn-status{
+    display:flex;align-items:center;gap:8px;font-size:12.5px;color:#dfe6d8;
+  }
+  .conn-dot{width:8px;height:8px;border-radius:50%;background:#8c9483;}
+  .conn-dot.on{background:#8fbf7a;}
+  .conn-dot.off{background:#c96a4f;}
+  .btn{
+    border:1px solid var(--line-strong);
+    background:var(--panel);
+    color:var(--ink);
+    padding:7px 13px;
+    border-radius:var(--radius);
+    cursor:pointer;
+    font-size:13px;
+    font-weight:500;
+  }
+  .btn:hover{border-color:var(--green);}
+  .btn.primary{
+    background:var(--clay);border-color:var(--clay-dark);color:#fff8f0;
+  }
+  .btn.primary:hover{background:var(--clay-dark);}
+  .btn.ghost{background:transparent;border-color:#4c5c47;color:#eef0e8;}
+  .btn.ghost:hover{background:rgba(255,255,255,.08);}
+  .btn.small{padding:4px 9px;font-size:12px;}
+  .btn.danger{color:var(--danger);border-color:var(--danger);background:#fff;}
+  .btn.danger:hover{background:var(--danger);color:#fff;}
+  .btn:disabled{opacity:.45;cursor:not-allowed;}
+
+  /* ---- shell body: tab rail + content ---- */
+  .shell{display:flex;flex:1;min-height:0;}
+  nav.rail{
+    width:168px;flex:none;
+    background:var(--green);
+    padding-top:18px;
+    display:flex;flex-direction:column;
+  }
+  nav.rail button{
+    text-align:left;
+    background:transparent;border:none;
+    color:#dbe4d3;
+    padding:12px 20px;
+    font-size:13.5px;font-weight:500;
+    cursor:pointer;
+    border-left:3px solid transparent;
+    letter-spacing:.2px;
+  }
+  nav.rail button .count{
+    float:right;color:#a9b79c;font-size:11.5px;
+  }
+  nav.rail button:hover{background:rgba(255,255,255,.06);}
+  nav.rail button.active{
+    background:var(--bg);color:var(--green-dark);
+    border-left-color:var(--clay);
+    font-weight:600;
+  }
+  nav.rail button.active .count{color:var(--clay-dark);}
+
+  main{flex:1;min-width:0;padding:22px 26px;overflow-y:auto;}
+  .view{display:none;}
+  .view.active{display:block;}
+  .view-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;}
+  .view-head h2{font-size:22px;color:var(--green-dark);}
+  .view-head p.sub{margin:4px 0 0;color:var(--muted);font-size:13px;}
+
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+  }
+  .panel + .panel{margin-top:16px;}
+  .panel .panel-title{
+    padding:11px 16px;border-bottom:1px solid var(--line);
+    font-family:'Fraunces',serif;font-weight:600;font-size:15px;color:var(--green-dark);
+    display:flex;align-items:center;justify-content:space-between;
+  }
+  .panel .panel-body{padding:16px;}
+
+  /* ---- champs view ---- */
+  .fields-layout{display:grid;grid-template-columns:1.1fr 1fr;gap:16px;align-items:start;}
+  #map{height:440px;border:1px solid var(--line);border-radius:var(--radius);background:#e9e7db;}
+  .field-row{
+    display:flex;align-items:center;gap:10px;
+    padding:10px 12px;
+    border-bottom:1px solid var(--line);
+    border-left:3px solid var(--line-strong);
+  }
+  .field-row:last-child{border-bottom:none;}
+  .field-row.has-boundary{border-left-color:var(--green);}
+  .field-row.no-boundary{border-left-color:var(--clay);}
+  .field-row .fname{font-weight:600;flex:1;}
+  .field-row .fmeta{font-size:12px;color:var(--muted);}
+  .field-row input.client-input{
+    width:120px;font-size:12.5px;padding:4px 6px;
+    border:1px solid var(--line-strong);border-radius:var(--radius);
+  }
+  .badge{
+    display:inline-block;font-size:11px;padding:2px 7px;border-radius:20px;
+    background:var(--green-wash);color:var(--green-dark);font-weight:600;
+  }
+  .badge.warn{background:var(--clay-wash);color:var(--clay-dark);}
+  .empty-note{color:var(--muted);font-size:13px;padding:18px 16px;text-align:center;}
+
+  .dropzone{
+    border:1.5px dashed var(--line-strong);border-radius:var(--radius);
+    padding:22px;text-align:center;color:var(--muted);font-size:13px;
+    background:#fbfaf5;
+  }
+  .dropzone strong{color:var(--ink);}
+
+  /* ---- interventions view ---- */
+  .interv-form{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+  .interv-form .full{grid-column:1/-1;}
+  .field-label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:500;}
+  select,input[type=text],input[type=date],input[type=number],textarea{
+    width:100%;padding:7px 9px;border:1px solid var(--line-strong);
+    border-radius:var(--radius);font-family:inherit;font-size:13.5px;color:var(--ink);
+    background:#fff;
+  }
+  textarea{resize:vertical;min-height:38px;}
+
+  table.ledger{width:100%;border-collapse:collapse;font-size:13px;}
+  table.ledger th{
+    text-align:left;font-weight:600;color:var(--green-dark);
+    font-size:11.5px;text-transform:none;letter-spacing:.2px;
+    padding:8px 10px;border-bottom:2px solid var(--line-strong);
+    background:var(--green-wash);
+  }
+  table.ledger td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top;}
+  table.ledger tr:hover td{background:#faf9f2;}
+  .type-pill{
+    display:inline-block;padding:2px 8px;border-radius:20px;font-size:11.5px;font-weight:600;
+    background:var(--clay-wash);color:var(--clay-dark);
+  }
+  .row-actions button{margin-right:4px;}
+
+  .filters{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
+  .filters > div{min-width:150px;}
+
+  /* ---- types view ---- */
+  .type-row{
+    display:flex;align-items:center;gap:10px;
+    padding:10px 16px;border-bottom:1px solid var(--line);
+  }
+  .type-row:last-child{border-bottom:none;}
+  .type-row .tname{flex:1;font-weight:600;}
+  .type-row input.price-input{width:110px;}
+  .add-type-row{display:flex;gap:8px;padding:14px 16px;border-top:1px solid var(--line);background:#fbfaf5;}
+  .add-type-row input#newTypeInput{flex:1;}
+
+  /* ---- data view ---- */
+  .kv{display:grid;grid-template-columns:180px 1fr;gap:6px 14px;font-size:13px;padding:16px;}
+  .kv dt{color:var(--muted);}
+  .kv dd{margin:0;}
+  .warning-box{
+    background:var(--clay-wash);border:1px solid var(--clay);color:var(--clay-dark);
+    padding:12px 14px;border-radius:var(--radius);font-size:13px;margin-bottom:16px;
+  }
+  .actions-row{display:flex;gap:10px;flex-wrap:wrap;padding:0 16px 16px;}
+  .toast{
+    position:fixed;bottom:18px;right:18px;
+    background:var(--green-dark);color:#f4f3ec;
+    padding:10px 16px;border-radius:var(--radius);font-size:13px;
+    box-shadow:0 4px 14px rgba(0,0,0,.2);
+    opacity:0;transform:translateY(8px);transition:all .25s ease;pointer-events:none;
+  }
+  .toast.show{opacity:1;transform:translateY(0);}
+
+  @media (max-width:880px){
+    .shell{flex-direction:column;}
+    nav.rail{width:100%;flex-direction:row;overflow-x:auto;padding-top:0;}
+    nav.rail button{border-left:none;border-bottom:3px solid transparent;white-space:nowrap;}
+    nav.rail button.active{border-left:none;border-bottom-color:var(--clay);}
+    .fields-layout{grid-template-columns:1fr;}
+    .interv-form{grid-template-columns:1fr 1fr;}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header class="top">
+    <div class="brand">
+      <h1>Carnet de Champs</h1>
+      <span class="tagline">traçabilité parcellaire &amp; facturation</span>
+    </div>
+    <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;">
+      <div class="conn-status">
+        <span class="conn-dot off" id="connDot"></span>
+        <span id="connLabel">Aucun dossier lié</span>
+        <button class="btn ghost small" id="btnPickFolder">Lier un dossier</button>
+      </div>
+      <div class="conn-status">
+        <span class="conn-dot off" id="odDot"></span>
+        <span id="odLabel">OneDrive non connecté</span>
+        <button class="btn ghost small" id="btnOneDrive">Connexion OneDrive</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="reconnectBanner" style="display:none;align-items:center;gap:12px;background:var(--clay-wash);color:var(--clay-dark);padding:9px 22px;font-size:13px;">
+    <span></span>
+    <button class="btn small primary">Reconnecter le dossier</button>
+  </div>
+
+  <div class="shell">
+    <nav class="rail">
+      <button class="tab-btn active" data-view="champs">Champs <span class="count" id="countFields"></span></button>
+      <button class="tab-btn" data-view="interventions">Interventions <span class="count" id="countInterv"></span></button>
+      <button class="tab-btn" data-view="types">Types d'intervention</button>
+      <button class="tab-btn" data-view="donnees">Données &amp; export</button>
+    </nav>
+
+    <main>
+
+      <!-- ===== CHAMPS ===== -->
+      <section class="view active" id="view-champs">
+        <div class="view-head">
+          <div>
+            <h2>Champs</h2>
+            <p class="sub">Importés depuis les dossiers AgOpenGPS (fichiers <code>Field.kml</code>)</p>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn" id="btnImportKmlManual">Importer des .kml</button>
+            <input type="file" id="fileKmlInput" accept=".kml" multiple style="display:none;">
+          </div>
+        </div>
+
+        <div class="fields-layout">
+          <div id="map"></div>
+          <div class="panel">
+            <div class="panel-title">Liste des champs</div>
+            <div id="fieldsList"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== INTERVENTIONS ===== -->
+      <section class="view" id="view-interventions">
+        <div class="view-head">
+          <div>
+            <h2>Interventions</h2>
+            <p class="sub">Saisie des travaux réalisés, par champ et par date</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Nouvelle intervention</div>
+          <div class="panel-body">
+            <form id="interventionForm" class="interv-form">
+              <div>
+                <label class="field-label">Champ</label>
+                <select id="fChamp" required></select>
+              </div>
+              <div>
+                <label class="field-label">Type</label>
+                <select id="fType" required></select>
+              </div>
+              <div>
+                <label class="field-label">Date</label>
+                <input type="date" id="fDate" required>
+              </div>
+              <div>
+                <label class="field-label">Surface (ha)</label>
+                <input type="number" step="0.01" id="fSurface" placeholder="auto">
+              </div>
+              <div>
+                <label class="field-label">Client</label>
+                <input type="text" id="fClient" placeholder="auto (depuis le champ)">
+              </div>
+              <div>
+                <label class="field-label">Prix (€)</label>
+                <input type="number" step="0.01" id="fPrix" placeholder="0,00">
+              </div>
+              <div class="full" style="grid-column:span 3;">
+                <label class="field-label">Détails (produit, dose, variété, façon culturale…)</label>
+                <input type="text" id="fDetails">
+              </div>
+              <div class="full">
+                <label class="field-label">Remarques</label>
+                <textarea id="fNotes"></textarea>
+              </div>
+              <div class="full" style="display:flex;justify-content:flex-end;">
+                <button type="submit" class="btn primary">Enregistrer l'intervention</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Historique</div>
+          <div class="panel-body">
+            <div class="filters">
+              <div>
+                <label class="field-label">Client</label>
+                <select id="filterClient"><option value="">Tous</option></select>
+              </div>
+              <div>
+                <label class="field-label">Champ</label>
+                <select id="filterField"><option value="">Tous</option></select>
+              </div>
+              <div>
+                <label class="field-label">Depuis le</label>
+                <input type="date" id="filterFrom">
+              </div>
+              <div>
+                <label class="field-label">Jusqu'au</label>
+                <input type="date" id="filterTo">
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <div style="font-size:13px;color:var(--muted);">
+                <span id="selectionCount">0 sélectionnée(s)</span> · Total affiché : <strong id="totalPrix">0,00 €</strong>
+              </div>
+              <button class="btn small" id="btnExportSelection" disabled>Exporter la sélection (.csv)</button>
+            </div>
+            <div style="overflow-x:auto;">
+              <table class="ledger">
+                <thead>
+                  <tr>
+                    <th style="width:26px;"><input type="checkbox" id="selectAllRows"></th>
+                    <th>Date</th><th>Client</th><th>Champ</th><th>Type</th><th>Surf. (ha)</th><th>Prix</th><th>Détails</th><th></th>
+                  </tr>
+                </thead>
+                <tbody id="interventionsBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== TYPES ===== -->
+      <section class="view" id="view-types">
+        <div class="view-head">
+          <div>
+            <h2>Types d'intervention</h2>
+            <p class="sub">Ajoute ou supprime les types proposés à la saisie</p>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">Liste des types</div>
+          <div id="typeList"></div>
+          <div class="add-type-row">
+            <input type="text" id="newTypeInput" placeholder="Nouveau type (ex. Broyage, Roulage…)">
+            <input type="number" step="0.01" id="newTypePrice" placeholder="Prix (€)" style="max-width:110px;">
+            <button class="btn primary small" id="btnAddType">Ajouter</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== DONNEES ===== -->
+      <section class="view" id="view-donnees">
+        <div class="view-head">
+          <div>
+            <h2>Données &amp; export</h2>
+            <p class="sub">Sauvegarde locale et export pour la facturation</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Stockage local</div>
+          <div class="panel-body">
+            <div class="warning-box" id="fsApiWarning" style="display:none;">
+              Ce navigateur ne permet pas l'écriture directe dans un dossier. Utilise les boutons
+              « Exporter les données » / « Importer les données » ci-dessous pour sauvegarder et
+              recharger ton travail d'une session à l'autre.
+            </div>
+            <dl class="kv">
+              <dt>Dossier lié</dt><dd id="dataFolderName">Aucun</dd>
+              <dt>Fichier de données</dt><dd><code>carnet-donnees.json</code></dd>
+              <dt>Dernière sauvegarde</dt><dd id="lastSaved">—</dd>
+              <dt>Adresse actuelle</dt><dd><code id="currentOrigin"></code></dd>
+            </dl>
+            <p class="sub" style="padding:0 16px 14px;margin:0;">
+              Pour que la liaison au dossier reste stable d'une session à l'autre, lance l'appli via
+              <strong>Lancer-Carnet-de-Champs.bat</strong> plutôt qu'en double-cliquant directement sur le fichier HTML —
+              ça ouvre l'appli sur une adresse locale fixe (<code>http://localhost:8743</code>) que le navigateur
+              retient mieux qu'un fichier ouvert directement.
+            </p>
+          </div>
+          <div class="actions-row">
+            <button class="btn" id="btnExportJson">Exporter les données (.json)</button>
+            <button class="btn" id="btnImportJson">Importer les données (.json)</button>
+            <input type="file" id="jsonInput" accept=".json" style="display:none;">
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Export facturation (.csv)</div>
+          <div class="panel-body">
+            <p class="sub" style="margin-top:0;">Exporte toutes les interventions filtrées dans l'onglet « Interventions ». Pour exporter une seule intervention ou une sélection précise, utilise les boutons directement dans le tableau de l'onglet Interventions.</p>
+          </div>
+          <div class="actions-row">
+            <button class="btn primary" id="btnExportCsv">Exporter le CSV</button>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   ÉTAT DE L'APPLICATION
+   ============================================================ */
+const DEFAULT_TYPES = ["Semis","Pulvérisation","Travail du sol","Récolte","Épandage","Autre"]
+  .map(name => ({name, price: null}));
+
+let state = {
+  fields: {},          // id -> {id,name,client,boundary:[[lat,lon],...],areaHa,source}
+  interventions: [],   // {id,fieldId,type,date,client,areaHa,price,details,notes}
+  types: [...DEFAULT_TYPES],   // {name, price}
+};
+
+/* remet en forme un état chargé (fichier JSON ou dossier) : gère les anciennes
+   données où "types" était un simple tableau de chaînes */
+function normalizeState(loaded){
+  const merged = Object.assign({fields:{},interventions:[],types:[...DEFAULT_TYPES]}, loaded);
+  if(Array.isArray(merged.types)){
+    merged.types = merged.types.map(t => typeof t === 'string' ? {name:t, price:null} : t);
+  }
+  return merged;
+}
+
+function getType(name){
+  return state.types.find(t=>t.name===name);
+}
+
+let dirHandle = null;       // File System Access API directory handle
+let fileHandle = null;      // handle to carnet-donnees.json inside dirHandle
+let map, layerGroup;
+let saveTimer = null;
+let graphSaveTimer = null;
+
+const fsApiSupported = 'showDirectoryPicker' in window;
+
+/* ============================================================
+   CONNEXION ONEDRIVE (Microsoft Graph via MSAL)
+   ============================================================ */
+const MSAL_CONFIG = {
+  auth: {
+    clientId: "953049cd-8a7a-4187-bcf2-07993ceaaefb",
+    authority: "https://login.microsoftonline.com/common",
+    redirectUri: window.location.origin + window.location.pathname,
+  },
+  cache: {
+    // localStorage volontairement : cette appli est une vraie appli web déployée
+    // (GitHub Pages), utilisée sur téléphone — on veut que la connexion survive
+    // à la fermeture du navigateur.
+    cacheLocation: "localStorage",
+    storeAuthStateInCookie: false,
+  }
+};
+const GRAPH_SCOPES = ["Files.ReadWrite"];
+const GRAPH_DATA_PATH = "/me/drive/root:/CarnetDeChamps/carnet-donnees.json";
+
+let msalInstance = null;
+let graphAccount = null;
+
+async function initMsal(){
+  if(typeof msal === 'undefined'){
+    console.warn("MSAL non chargé (hors-ligne ?)");
+    return;
+  }
+  msalInstance = new msal.PublicClientApplication(MSAL_CONFIG);
+  await msalInstance.initialize();
+
+  try{
+    const result = await msalInstance.handleRedirectPromise();
+    if(result && result.account){
+      graphAccount = result.account;
+    }
+  }catch(e){
+    console.error("Erreur retour de connexion Microsoft", e);
+    toast("Échec de la connexion Microsoft — réessaie.");
+  }
+
+  if(!graphAccount){
+    const accounts = msalInstance.getAllAccounts();
+    if(accounts.length) graphAccount = accounts[0];
+  }
+
+  if(graphAccount){
+    msalInstance.setActiveAccount(graphAccount);
+    updateOneDriveUI(true);
+    await graphLoadIntoState();
+  }
+}
+
+function updateOneDriveUI(connected){
+  document.getElementById('odDot').className = 'conn-dot ' + (connected ? 'on' : 'off');
+  document.getElementById('odLabel').textContent = connected
+    ? ('OneDrive : ' + (graphAccount ? graphAccount.username : 'connecté'))
+    : 'OneDrive non connecté';
+  document.getElementById('btnOneDrive').textContent = connected ? 'Déconnecter' : 'Connexion OneDrive';
+}
+
+async function connectOneDrive(){
+  if(!msalInstance){ toast("Connexion Microsoft indisponible pour l'instant."); return; }
+  if(graphAccount){
+    // déconnexion
+    msalInstance.setActiveAccount(null);
+    graphAccount = null;
+    updateOneDriveUI(false);
+    toast("Déconnecté de OneDrive");
+    return;
+  }
+  try{
+    await msalInstance.loginRedirect({scopes: GRAPH_SCOPES});
+    // la page se recharge ici (flux redirect) ; la suite se passe dans initMsal()
+  }catch(e){
+    console.error(e);
+    toast("Échec de la connexion Microsoft");
+  }
+}
+
+async function getGraphToken(){
+  if(!msalInstance || !graphAccount) return null;
+  try{
+    const res = await msalInstance.acquireTokenSilent({scopes: GRAPH_SCOPES, account: graphAccount});
+    return res.accessToken;
+  }catch(e){
+    try{
+      const res = await msalInstance.acquireTokenRedirect({scopes: GRAPH_SCOPES});
+      return null; // redirection en cours, la page va se recharger
+    }catch(e2){
+      console.error("Impossible d'obtenir un jeton Graph", e2);
+      return null;
+    }
+  }
+}
+
+async function graphLoadIntoState(){
+  const token = await getGraphToken();
+  if(!token) return;
+  try{
+    const res = await fetch("https://graph.microsoft.com/v1.0" + GRAPH_DATA_PATH + ":/content", {
+      headers: {Authorization: "Bearer " + token}
+    });
+    if(res.status === 404){
+      // rien encore sur OneDrive : on y met l'état actuel comme point de départ
+      await graphSaveNow();
+      return;
+    }
+    if(!res.ok) throw new Error("Graph GET " + res.status);
+    const loaded = await res.json();
+    state = normalizeState(loaded);
+    renderAll();
+    toast("Données chargées depuis OneDrive");
+  }catch(e){
+    console.error("Erreur de lecture OneDrive", e);
+    toast("Impossible de charger les données depuis OneDrive");
+  }
+}
+
+async function graphSaveNow(){
+  const token = await getGraphToken();
+  if(!token) return;
+  try{
+    const res = await fetch("https://graph.microsoft.com/v1.0" + GRAPH_DATA_PATH + ":/content", {
+      method: "PUT",
+      headers: {Authorization: "Bearer " + token, "Content-Type": "application/json"},
+      body: JSON.stringify(state)
+    });
+    if(!res.ok) throw new Error("Graph PUT " + res.status);
+  }catch(e){
+    console.error("Erreur de sauvegarde OneDrive", e);
+  }
+}
+
+function scheduleGraphSave(){
+  if(!graphAccount) return;
+  clearTimeout(graphSaveTimer);
+  graphSaveTimer = setTimeout(graphSaveNow, 800);
+}
+
+/* ---- persistance du handle de dossier entre sessions (IndexedDB) ---- */
+const IDB_NAME = 'carnet-de-champs';
+const IDB_STORE = 'handles';
+function idbOpen(){
+  return new Promise((resolve,reject)=>{
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = ()=> req.result.createObjectStore(IDB_STORE);
+    req.onsuccess = ()=> resolve(req.result);
+    req.onerror = ()=> reject(req.error);
+  });
+}
+async function idbSet(key, val){
+  try{
+    const db = await idbOpen();
+    return new Promise((resolve,reject)=>{
+      const tx = db.transaction(IDB_STORE,'readwrite');
+      tx.objectStore(IDB_STORE).put(val, key);
+      tx.oncomplete = ()=>resolve();
+      tx.onerror = ()=>reject(tx.error);
+    });
+  }catch(e){ console.warn('IndexedDB indisponible', e); }
+}
+async function idbGet(key){
+  try{
+    const db = await idbOpen();
+    return new Promise((resolve,reject)=>{
+      const tx = db.transaction(IDB_STORE,'readonly');
+      const req = tx.objectStore(IDB_STORE).get(key);
+      req.onsuccess = ()=>resolve(req.result || null);
+      req.onerror = ()=>reject(req.error);
+    });
+  }catch(e){ return null; }
+}
+
+/* ============================================================
+   UTILITAIRES
+   ============================================================ */
+function uid(){ return Math.random().toString(36).slice(2,10); }
+
+function frenchNumber(str){
+  if(!str) return null;
+  const n = parseFloat(String(str).replace(',','.'));
+  return isNaN(n) ? null : n;
+}
+
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(()=>t.classList.remove('show'), 2600);
+}
+
+function fieldsArray(){
+  return Object.values(state.fields).sort((a,b)=>a.name.localeCompare(b.name,'fr'));
+}
+
+/* ============================================================
+   PARSING KML (Field.kml AgOpenGPS)
+   ============================================================ */
+function parseFieldKml(text, fallbackName){
+  const doc = new DOMParser().parseFromString(text, "application/xml");
+
+  const getName = (el) => {
+    if(!el) return null;
+    let n = el.querySelector(':scope > name, :scope > n');
+    return n ? n.textContent.trim() : null;
+  };
+
+  // nom du champ : essaie le Placemark de bordure, sinon "Field Stats"
+  let fieldName = null;
+  let areaHa = null;
+
+  const folders = Array.from(doc.querySelectorAll('Folder'));
+  const statsFolder = folders.find(f => (getName(f)||'').toLowerCase().includes('field stats'));
+  if(statsFolder){
+    const desc = statsFolder.querySelector('description');
+    if(desc){
+      const txt = desc.textContent;
+      const m = txt.match(/Field:\s*(.+)/);
+      if(m) fieldName = m[1].trim();
+      const ha = txt.match(/Total Hectares:\s*([\d.,]+)/);
+      if(ha) areaHa = frenchNumber(ha[1]);
+    }
+  }
+
+  const boundaryFolder = folders.find(f => (getName(f)||'').toLowerCase() === 'boundaries');
+  let boundary = [];
+  if(boundaryFolder){
+    const placemarks = Array.from(boundaryFolder.querySelectorAll('Placemark'));
+    if(!fieldName && placemarks.length){
+      fieldName = getName(placemarks[0]);
+    }
+    placemarks.forEach(pm=>{
+      const coordsEls = pm.querySelectorAll('outerBoundaryIs coordinates, Polygon coordinates');
+      coordsEls.forEach(ce=>{
+        const pts = ce.textContent.trim().split(/\s+/).map(triplet=>{
+          const [lon,lat] = triplet.split(',').map(Number);
+          return [lat,lon];
+        }).filter(p=>!isNaN(p[0]) && !isNaN(p[1]));
+        if(pts.length>2) boundary.push(pts);
+      });
+    });
+  }
+
+  if(!fieldName) fieldName = fallbackName || 'Champ sans nom';
+
+  return { name: fieldName, boundary, areaHa };
+}
+
+function upsertFieldFromKml(parsed, sourceLabel){
+  // clé stable = nom du champ (normalisé)
+  const key = parsed.name.trim().toLowerCase();
+  let existing = Object.values(state.fields).find(f=>f.name.trim().toLowerCase()===key);
+  if(existing){
+    existing.boundary = parsed.boundary.length ? parsed.boundary : existing.boundary;
+    if(parsed.areaHa) existing.areaHa = parsed.areaHa;
+    existing.source = sourceLabel;
+  } else {
+    const id = uid();
+    state.fields[id] = {
+      id, name: parsed.name, client: '',
+      boundary: parsed.boundary, areaHa: parsed.areaHa || null,
+      source: sourceLabel,
+    };
+  }
+}
+
+async function importKmlFiles(fileList){
+  let count = 0;
+  for(const file of fileList){
+    try{
+      const text = await file.text();
+      const parsed = parseFieldKml(text, file.name.replace(/\.kml$/i,''));
+      upsertFieldFromKml(parsed, file.name);
+      count++;
+    }catch(e){
+      console.error('Erreur import', file.name, e);
+    }
+  }
+  if(count){
+    toast(count+" champ(s) importé(s)");
+    renderFields();
+    refreshFieldSelects();
+    scheduleSave();
+  }
+}
+
+/* recherche récursive de Field.kml dans un dossier lié (File System Access API) */
+async function scanDirectoryForFieldKml(handle, depth, counters){
+  if(depth > 6) return;
+  let entries;
+  try{
+    entries = handle.entries();
+  }catch(e){
+    counters.errors.push(handle.name+' (accès refusé)');
+    return;
+  }
+  while(true){
+    let step;
+    try{
+      step = await entries.next();
+    }catch(e){
+      counters.errors.push(handle.name+' (lecture interrompue)');
+      break;
+    }
+    if(step.done) break;
+    const [name, entry] = step.value;
+    counters.entriesSeen++;
+    try{
+      if(entry.kind === 'file' && /^field\.kml$/i.test(name)){
+        counters.kmlSeen++;
+        const file = await entry.getFile();
+        const text = await file.text();
+        const parentLabel = handle.name ? handle.name : name;
+        const parsed = parseFieldKml(text, parentLabel);
+        upsertFieldFromKml(parsed, parentLabel+'/'+name);
+        counters.fieldsFound++;
+      } else if(entry.kind === 'directory'){
+        await scanDirectoryForFieldKml(entry, depth+1, counters);
+      }
+    }catch(e){
+      counters.errors.push((handle.name||'')+'/'+name+' : '+(e.message||e.name||'erreur inconnue'));
+    }
+  }
+}
+
+/* ============================================================
+   STOCKAGE : File System Access API + fallback JSON manuel
+   ============================================================ */
+async function pickFolder(){
+  if(!fsApiSupported){
+    toast("Ce navigateur ne supporte pas la liaison directe à un dossier — utilise l'export/import JSON.");
+    return;
+  }
+  try{
+    const handle = await window.showDirectoryPicker();
+    await idbSet('rootDir', handle);
+    await connectToDirHandle(handle);
+  }catch(e){
+    if(e.name !== 'AbortError') console.error(e);
+  }
+}
+
+async function connectToDirHandle(handle){
+  dirHandle = handle;
+  document.getElementById('connDot').className = 'conn-dot on';
+  document.getElementById('connLabel').textContent = 'Dossier lié : '+dirHandle.name;
+  document.getElementById('dataFolderName').textContent = dirHandle.name;
+  document.getElementById('reconnectBanner').style.display = 'none';
+
+  // charger les données existantes si présentes
+  try{
+    fileHandle = await dirHandle.getFileHandle('carnet-donnees.json');
+    const file = await fileHandle.getFile();
+    const text = await file.text();
+    const loaded = JSON.parse(text);
+    state = normalizeState(loaded);
+    toast("Données chargées depuis le dossier");
+  }catch(e){
+    fileHandle = await dirHandle.getFileHandle('carnet-donnees.json', {create:true});
+    toast("Nouveau fichier de données créé dans le dossier");
+  }
+
+  // scan automatique des champs AgOpenGPS présents dans le dossier
+  const counters = {entriesSeen:0, kmlSeen:0, fieldsFound:0, errors:[]};
+  try{
+    await scanDirectoryForFieldKml(dirHandle, 0, counters);
+  }catch(e){
+    counters.errors.push('Erreur générale : '+(e.message||e.name));
+  }
+
+  renderAll();
+  scheduleSave();
+
+  if(counters.fieldsFound > 0){
+    toast(counters.fieldsFound+" champ(s) trouvé(s) dans « "+dirHandle.name+" »");
+  } else if(counters.entriesSeen === 0){
+    toast("Le dossier « "+dirHandle.name+" » semble vide ou inaccessible depuis ce navigateur.");
+  } else if(counters.kmlSeen === 0){
+    toast("Aucun fichier Field.kml trouvé dans « "+dirHandle.name+" » (parcouru : "+counters.entriesSeen+" élément(s)). Vérifie que c'est bien le bon dossier.");
+  } else {
+    toast("Field.kml trouvé(s) mais non exploitable(s) — voir la console (F12) pour le détail.");
+  }
+  if(counters.errors.length){
+    console.warn('Erreurs de scan :', counters.errors);
+  }
+}
+
+/* tente de reconnecter automatiquement le dossier lié lors d'une session précédente */
+async function tryRestoreDirHandle(){
+  if(!fsApiSupported) return;
+  const handle = await idbGet('rootDir');
+  if(!handle) return;
+  try{
+    const perm = await handle.queryPermission({mode:'readwrite'});
+    if(perm === 'granted'){
+      await connectToDirHandle(handle);
+    } else {
+      // la permission doit être reconfirmée par un geste utilisateur (clic)
+      showReconnectBanner(handle);
+    }
+  }catch(e){
+    console.warn('Handle de dossier invalide, à relier manuellement', e);
+  }
+}
+
+function showReconnectBanner(handle){
+  const banner = document.getElementById('reconnectBanner');
+  banner.style.display = 'flex';
+  banner.querySelector('span').textContent = 'Dossier « '+handle.name+' » lié précédemment — reconnecte-le pour continuer.';
+  const btn = banner.querySelector('button');
+  btn.onclick = async ()=>{
+    try{
+      const perm = await handle.requestPermission({mode:'readwrite'});
+      if(perm === 'granted'){
+        await connectToDirHandle(handle);
+      } else {
+        toast("Permission refusée pour ce dossier.");
+      }
+    }catch(e){ console.error(e); toast("Impossible de reconnecter ce dossier."); }
+  };
+}
+
+function scheduleSave(){
+  document.getElementById('lastSaved').textContent = new Date().toLocaleString('fr-FR');
+  scheduleGraphSave();
+  if(!fileHandle) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async ()=>{
+    try{
+      const writable = await fileHandle.createWritable();
+      await writable.write(JSON.stringify(state, null, 2));
+      await writable.close();
+    }catch(e){ console.error('Erreur sauvegarde', e); }
+  }, 500);
+}
+
+function exportJson(){
+  const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'carnet-donnees.json';
+  a.click();
+}
+
+function importJsonFile(file){
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try{
+      const loaded = JSON.parse(reader.result);
+      state = normalizeState(loaded);
+      renderAll();
+      toast("Données importées");
+    }catch(e){ toast("Fichier JSON invalide"); }
+  };
+  reader.readAsText(file);
+}
+
+/* ============================================================
+   RENDU — CHAMPS
+   ============================================================ */
+function initMap(){
+  map = L.map('map').setView([46.7, 1.7], 6);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 19,
+  }).addTo(map);
+  layerGroup = L.layerGroup().addTo(map);
+}
+
+function renderFields(){
+  const list = document.getElementById('fieldsList');
+  const fields = fieldsArray();
+  document.getElementById('countFields').textContent = fields.length || '';
+
+  if(!fields.length){
+    list.innerHTML = '<div class="empty-note">Aucun champ importé pour l\'instant. Lie ton dossier OneDrive ou importe des fichiers .kml.</div>';
+  } else {
+    list.innerHTML = fields.map(f=>{
+      const hasB = f.boundary && f.boundary.length;
+      return `<div class="field-row ${hasB?'has-boundary':'no-boundary'}">
+        <div style="flex:1;">
+          <div class="fname">${escapeHtml(f.name)}</div>
+          <div class="fmeta">${f.areaHa ? f.areaHa.toFixed(2).replace('.',',')+' ha · ' : ''}${hasB ? 'bordure tracée' : 'pas de bordure tracée'}</div>
+        </div>
+        <input class="client-input" data-field="${f.id}" placeholder="Client" value="${escapeHtml(f.client||'')}">
+        <button class="btn small" data-add-interv="${f.id}" title="Ajouter une intervention pour ce champ">+ Intervention</button>
+      </div>`;
+    }).join('');
+    list.querySelectorAll('[data-add-interv]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        goToInterventionForm(btn.dataset.addInterv);
+      });
+    });
+    list.querySelectorAll('.client-input').forEach(inp=>{
+      inp.addEventListener('change', e=>{
+        state.fields[e.target.dataset.field].client = e.target.value;
+        scheduleSave();
+        refreshFilterSelects();
+      });
+    });
+  }
+
+  // carte
+  layerGroup.clearLayers();
+  let bounds = [];
+  fields.forEach(f=>{
+    if(f.boundary && f.boundary.length){
+      f.boundary.forEach(ring=>{
+        const poly = L.polygon(ring, {color:'#a15c2e', weight:2, fillColor:'#33503a', fillOpacity:.25});
+        poly.bindTooltip(f.name);
+        poly.addTo(layerGroup);
+        bounds = bounds.concat(ring);
+      });
+    }
+  });
+  if(bounds.length){
+    map.fitBounds(bounds, {padding:[20,20]});
+  }
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function goToInterventionForm(fieldId){
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.querySelector('.tab-btn[data-view="interventions"]').classList.add('active');
+  document.getElementById('view-interventions').classList.add('active');
+  const sel = document.getElementById('fChamp');
+  sel.value = fieldId;
+  sel.dispatchEvent(new Event('change'));
+  delete document.getElementById('fPrix').dataset.userEdited;
+  document.getElementById('fType').dispatchEvent(new Event('change'));
+  document.getElementById('interventionForm').scrollIntoView({behavior:'smooth', block:'start'});
+  document.getElementById('fType').focus();
+}
+
+/* ============================================================
+   RENDU — TYPES
+   ============================================================ */
+function renderTypes(){
+  const list = document.getElementById('typeList');
+  if(!state.types.length){
+    list.innerHTML = '<div class="empty-note">Aucun type défini.</div>';
+    return;
+  }
+  list.innerHTML = state.types.map(t=>{
+    return `<div class="type-row">
+      <span class="tname">${escapeHtml(t.name)}</span>
+      <input type="number" step="0.01" class="price-input" data-price-for="${escapeHtml(t.name)}"
+        value="${t.price!=null ? t.price : ''}" placeholder="Prix (€)">
+      <button class="btn small danger" data-del-type="${escapeHtml(t.name)}">Supprimer</button>
+    </div>`;
+  }).join('');
+
+  list.querySelectorAll('[data-price-for]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      const t = getType(inp.dataset.priceFor);
+      if(t){
+        t.price = frenchNumber(inp.value);
+        scheduleSave();
+      }
+    });
+  });
+  list.querySelectorAll('[data-del-type]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const name = btn.dataset.delType;
+      const used = state.interventions.some(i=>i.type===name);
+      if(used && !confirm(`Le type « ${name} » est utilisé par des interventions déjà saisies. Le supprimer quand même de la liste ?`)) return;
+      state.types = state.types.filter(t=>t.name!==name);
+      renderTypes();
+      refreshTypeSelect();
+      scheduleSave();
+    });
+  });
+}
+
+/* ============================================================
+   RENDU — INTERVENTIONS
+   ============================================================ */
+function refreshFieldSelects(){
+  const champSel = document.getElementById('fChamp');
+  const filterField = document.getElementById('filterField');
+  const fields = fieldsArray();
+  const opts = fields.map(f=>`<option value="${f.id}">${escapeHtml(f.name)}</option>`).join('');
+  champSel.innerHTML = opts || '<option value="">Aucun champ</option>';
+  filterField.innerHTML = '<option value="">Tous</option>' + opts;
+}
+
+function refreshTypeSelect(){
+  const sel = document.getElementById('fType');
+  sel.innerHTML = state.types.map(t=>`<option value="${escapeHtml(t.name)}">${escapeHtml(t.name)}</option>`).join('');
+}
+
+function refreshFilterSelects(){
+  const clientSel = document.getElementById('filterClient');
+  const clients = Array.from(new Set(fieldsArray().map(f=>f.client).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'fr'));
+  clientSel.innerHTML = '<option value="">Tous</option>' + clients.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+}
+
+document.getElementById('fChamp').addEventListener('change', e=>{
+  const f = state.fields[e.target.value];
+  if(f){
+    document.getElementById('fSurface').placeholder = f.areaHa ? f.areaHa.toFixed(2) : 'auto';
+    document.getElementById('fClient').placeholder = f.client || 'auto (depuis le champ)';
+  }
+});
+
+document.getElementById('fType').addEventListener('change', e=>{
+  const t = getType(e.target.value);
+  const prixField = document.getElementById('fPrix');
+  // ne remplace le prix que s'il n'a pas déjà été saisi à la main
+  if(t && t.price != null && !prixField.dataset.userEdited){
+    prixField.value = t.price;
+  }
+});
+document.getElementById('fPrix').addEventListener('input', e=>{
+  e.target.dataset.userEdited = '1';
+});
+
+document.getElementById('interventionForm').addEventListener('submit', e=>{
+  e.preventDefault();
+  const fieldId = document.getElementById('fChamp').value;
+  const f = state.fields[fieldId];
+  if(!f){ toast("Sélectionne un champ"); return; }
+  const surface = frenchNumber(document.getElementById('fSurface').value) || f.areaHa || null;
+  const client = document.getElementById('fClient').value.trim() || f.client || '';
+
+  state.interventions.push({
+    id: uid(),
+    fieldId,
+    type: document.getElementById('fType').value,
+    date: document.getElementById('fDate').value,
+    client,
+    areaHa: surface,
+    price: frenchNumber(document.getElementById('fPrix').value),
+    details: document.getElementById('fDetails').value.trim(),
+    notes: document.getElementById('fNotes').value.trim(),
+  });
+
+  e.target.reset();
+  document.getElementById('fDate').value = '';
+  delete document.getElementById('fPrix').dataset.userEdited;
+  renderInterventions();
+  refreshFilterSelects();
+  scheduleSave();
+  toast("Intervention enregistrée");
+});
+
+function currentFilters(){
+  return {
+    client: document.getElementById('filterClient').value,
+    fieldId: document.getElementById('filterField').value,
+    from: document.getElementById('filterFrom').value,
+    to: document.getElementById('filterTo').value,
+  };
+}
+
+function filteredInterventions(){
+  const {client, fieldId, from, to} = currentFilters();
+  return state.interventions
+    .filter(i => !client || i.client === client)
+    .filter(i => !fieldId || i.fieldId === fieldId)
+    .filter(i => !from || i.date >= from)
+    .filter(i => !to || i.date <= to)
+    .sort((a,b) => (b.date||'').localeCompare(a.date||''));
+}
+
+let selectedInterventions = new Set();
+
+function renderInterventions(){
+  const body = document.getElementById('interventionsBody');
+  const rows = filteredInterventions();
+  document.getElementById('countInterv').textContent = state.interventions.length || '';
+
+  // nettoyer la sélection des lignes qui ne sont plus visibles/existantes
+  const visibleIds = new Set(rows.map(r=>r.id));
+  Array.from(selectedInterventions).forEach(id=>{ if(!visibleIds.has(id)) selectedInterventions.delete(id); });
+
+  if(!rows.length){
+    body.innerHTML = `<tr><td colspan="9" class="empty-note">Aucune intervention pour ces filtres.</td></tr>`;
+  } else {
+    body.innerHTML = rows.map(i=>{
+      const f = state.fields[i.fieldId];
+      const checked = selectedInterventions.has(i.id) ? 'checked' : '';
+      return `<tr>
+        <td><input type="checkbox" class="row-select" data-id="${i.id}" ${checked}></td>
+        <td>${i.date ? formatDateFr(i.date) : '—'}</td>
+        <td>${escapeHtml(i.client||'—')}</td>
+        <td>${escapeHtml(f ? f.name : '—')}</td>
+        <td><span class="type-pill">${escapeHtml(i.type)}</span></td>
+        <td>${i.areaHa ? i.areaHa.toFixed(2).replace('.',',') : '—'}</td>
+        <td>${formatPrice(i.price)}</td>
+        <td>${escapeHtml(i.details||'—')}</td>
+        <td class="row-actions">
+          <button class="btn small" data-export="${i.id}" title="Exporter uniquement cette intervention">Export</button>
+          <button class="btn small danger" data-del="${i.id}">Suppr.</button>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  body.querySelectorAll('[data-del]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!confirm("Supprimer cette intervention ?")) return;
+      state.interventions = state.interventions.filter(i=>i.id!==btn.dataset.del);
+      selectedInterventions.delete(btn.dataset.del);
+      renderInterventions();
+      scheduleSave();
+    });
+  });
+  body.querySelectorAll('[data-export]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const interv = state.interventions.find(i=>i.id===btn.dataset.export);
+      if(interv) exportCsv([interv], 'intervention-'+(interv.date||'')+'.csv');
+    });
+  });
+  body.querySelectorAll('.row-select').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      if(cb.checked) selectedInterventions.add(cb.dataset.id);
+      else selectedInterventions.delete(cb.dataset.id);
+      updateSelectionUI(rows);
+    });
+  });
+
+  updateSelectionUI(rows);
+}
+
+function updateSelectionUI(rows){
+  const count = selectedInterventions.size;
+  document.getElementById('selectionCount').textContent = count+' sélectionnée(s)';
+  document.getElementById('btnExportSelection').disabled = count === 0;
+  const total = rows.reduce((sum,i)=> sum + (typeof i.price==='number' ? i.price : 0), 0);
+  document.getElementById('totalPrix').textContent = formatPrice(total, true);
+  const selectAll = document.getElementById('selectAllRows');
+  selectAll.checked = rows.length>0 && count === rows.length;
+}
+
+function formatPrice(v, forceZero){
+  if(typeof v !== 'number' || isNaN(v)){
+    return forceZero ? '0,00 €' : '—';
+  }
+  return v.toFixed(2).replace('.',',')+' €';
+}
+
+document.getElementById('selectAllRows').addEventListener('change', e=>{
+  const rows = filteredInterventions();
+  if(e.target.checked) rows.forEach(r=>selectedInterventions.add(r.id));
+  else rows.forEach(r=>selectedInterventions.delete(r.id));
+  renderInterventions();
+});
+
+function formatDateFr(iso){
+  const [y,m,d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+['filterClient','filterField','filterFrom','filterTo'].forEach(id=>{
+  document.getElementById(id).addEventListener('change', renderInterventions);
+});
+
+/* ============================================================
+   EXPORT CSV
+   ============================================================ */
+function exportCsv(rows, filename){
+  rows = rows || filteredInterventions();
+  if(!rows.length){ toast("Aucune intervention à exporter"); return; }
+  const header = ['Date','Client','Champ','Type','Surface (ha)','Prix (€)','Détails','Remarques'];
+  const lines = [header.join(';')];
+  let total = 0;
+  rows.forEach(i=>{
+    const f = state.fields[i.fieldId];
+    if(typeof i.price === 'number') total += i.price;
+    const line = [
+      i.date ? formatDateFr(i.date) : '',
+      i.client||'',
+      f ? f.name : '',
+      i.type,
+      i.areaHa ? String(i.areaHa).replace('.',',') : '',
+      typeof i.price === 'number' ? String(i.price).replace('.',',') : '',
+      (i.details||'').replace(/;/g,','),
+      (i.notes||'').replace(/;/g,','),
+    ];
+    lines.push(line.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(';'));
+  });
+  lines.push(['','','','','Total',String(total.toFixed(2)).replace('.',','),'',''].map(v=>`"${v}"`).join(';'));
+  const blob = new Blob(["\uFEFF"+lines.join('\r\n')], {type:'text/csv;charset=utf-8;'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename || 'interventions-export.csv';
+  a.click();
+}
+
+/* ============================================================
+   NAVIGATION ONGLETS
+   ============================================================ */
+document.querySelectorAll('.tab-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('view-'+btn.dataset.view).classList.add('active');
+    if(btn.dataset.view === 'champs' && map){ setTimeout(()=>map.invalidateSize(), 50); }
+  });
+});
+
+/* ============================================================
+   RENDU GLOBAL
+   ============================================================ */
+function renderAll(){
+  renderFields();
+  refreshFieldSelects();
+  refreshTypeSelect();
+  refreshFilterSelects();
+  renderTypes();
+  renderInterventions();
+}
+
+/* ============================================================
+   ÉVÉNEMENTS UI
+   ============================================================ */
+document.getElementById('btnPickFolder').addEventListener('click', pickFolder);
+document.getElementById('btnOneDrive').addEventListener('click', connectOneDrive);
+
+document.getElementById('btnImportKmlManual').addEventListener('click', ()=>{
+  document.getElementById('fileKmlInput').click();
+});
+document.getElementById('fileKmlInput').addEventListener('change', e=>{
+  if(e.target.files.length) importKmlFiles(Array.from(e.target.files));
+  e.target.value = '';
+});
+
+document.getElementById('btnAddType').addEventListener('click', ()=>{
+  const inp = document.getElementById('newTypeInput');
+  const priceInp = document.getElementById('newTypePrice');
+  const val = inp.value.trim();
+  if(!val) return;
+  if(state.types.some(t=>t.name.toLowerCase()===val.toLowerCase())){ toast("Ce type existe déjà"); return; }
+  state.types.push({name: val, price: frenchNumber(priceInp.value)});
+  inp.value = '';
+  priceInp.value = '';
+  renderTypes();
+  refreshTypeSelect();
+  scheduleSave();
+});
+document.getElementById('newTypeInput').addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ e.preventDefault(); document.getElementById('btnAddType').click(); }
+});
+
+document.getElementById('btnExportJson').addEventListener('click', exportJson);
+document.getElementById('btnImportJson').addEventListener('click', ()=>document.getElementById('jsonInput').click());
+document.getElementById('jsonInput').addEventListener('change', e=>{
+  if(e.target.files.length) importJsonFile(e.target.files[0]);
+  e.target.value = '';
+});
+document.getElementById('btnExportCsv').addEventListener('click', ()=>exportCsv());
+document.getElementById('btnExportSelection').addEventListener('click', ()=>{
+  const rows = state.interventions.filter(i=>selectedInterventions.has(i.id));
+  exportCsv(rows, 'interventions-selection.csv');
+});
+
+/* ============================================================
+   INITIALISATION
+   ============================================================ */
+if(!fsApiSupported){
+  document.getElementById('fsApiWarning').style.display = 'block';
+  document.getElementById('btnPickFolder').disabled = true;
+  document.getElementById('btnPickFolder').title = "Non supporté par ce navigateur";
+}
+
+initMap();
+renderAll();
+document.getElementById('fDate').valueAsDate = new Date();
+tryRestoreDirHandle();
+initMsal();
+
+document.getElementById('currentOrigin').textContent = location.origin === 'null' ? 'file:// (page ouverte directement)' : location.origin;
+if(location.protocol === 'file:'){
+  const warn = document.getElementById('fsApiWarning');
+  warn.style.display = 'block';
+  warn.textContent = "Cette page est ouverte directement depuis un fichier : la liaison au dossier risque de ne pas être mémorisée d'une session à l'autre. Lance plutôt Lancer-Carnet-de-Champs.bat pour une liaison stable.";
+}
+</script>
+</body>
+</html>
