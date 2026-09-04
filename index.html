@@ -604,10 +604,15 @@ async function connectGithub(){
       return;
     }
     if(res.status === 401 || res.status === 403){
-      toast("Jeton refusé — vérifie qu'il a bien la permission sur les dépôts privés");
+      const body = await res.json().catch(()=>({}));
+      toast("GitHub a refusé le jeton (" + res.status + (body.message ? " — "+body.message : "") + ")");
+      ghConfig = null;
       return;
     }
-    if(!res.ok) throw new Error("GitHub GET " + res.status);
+    if(!res.ok){
+      const body = await res.json().catch(()=>({}));
+      throw new Error(res.status + (body.message ? " — "+body.message : ""));
+    }
     const data = await res.json();
     ghSha = data.sha;
     const loaded = JSON.parse(base64ToUtf8(data.content.replace(/\n/g,'')));
@@ -618,7 +623,7 @@ async function connectGithub(){
     toast("Données chargées depuis GitHub");
   }catch(e){
     console.error(e);
-    toast("Connexion GitHub impossible — vérifie le dépôt et le jeton");
+    toast("Connexion GitHub impossible : " + (e.message || e));
     ghConfig = null;
   }
 }
@@ -667,7 +672,10 @@ async function tryRestoreGithub(){
   ghConfig = cfg;
   try{
     const res = await ghApiFetch('GET');
-    if(!res.ok) throw new Error("GitHub GET " + res.status);
+    if(!res.ok){
+      const body = await res.json().catch(()=>({}));
+      throw new Error(res.status + (body.message ? " — "+body.message : ""));
+    }
     const data = await res.json();
     ghSha = data.sha;
     const loaded = JSON.parse(base64ToUtf8(data.content.replace(/\n/g,'')));
@@ -676,6 +684,7 @@ async function tryRestoreGithub(){
     updateGithubUI(true);
   }catch(e){
     console.error("Reconnexion GitHub échouée", e);
+    toast("Reconnexion GitHub échouée : " + (e.message || e));
     updateGithubUI(false);
   }
 }
