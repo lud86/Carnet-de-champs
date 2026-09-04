@@ -247,7 +247,7 @@
         <span id="odLabel">GitHub non connecté</span>
         <button class="btn ghost small" id="btnGoToGithub">Connexion GitHub</button>
       </div>
-      <span style="font-size:10px;color:#8a9280;">v2026-09-04-2</span>
+      <span style="font-size:10px;color:#8a9280;">v2026-09-04-3</span>
     </div>
   </header>
 
@@ -589,15 +589,17 @@ async function ghApiFetch(method, body){
    champ "content" (base64) de l'API Contents, qui est omis ou tronqué par
    GitHub au-delà d'environ 1 Mo. */
 async function ghFetchContent(meta){
-  if(!meta.download_url){
-    // fallback : ancien comportement (petits fichiers)
-    return base64ToUtf8((meta.content||'').replace(/\n/g,'')).trim();
-  }
-  const res = await fetch(meta.download_url + (meta.download_url.includes('?') ? '&' : '?') + 't=' + Date.now(), {
+  const url = `https://api.github.com/repos/${ghConfig.repo}/contents/${ghConfig.path}?t=${Date.now()}`;
+  const res = await fetch(url, {
     cache: "no-store",
-    headers: {"Authorization": "Bearer " + ghConfig.token}
+    headers: {
+      "Authorization": "Bearer " + ghConfig.token,
+      // demande le contenu brut du fichier plutôt que l'enveloppe JSON+base64,
+      // qui a une limite de taille d'environ 1 Mo
+      "Accept": "application/vnd.github.v3.raw",
+    }
   });
-  if(!res.ok) throw new Error("Téléchargement du fichier impossible (" + res.status + ")");
+  if(!res.ok) throw new Error("Lecture du fichier impossible (" + res.status + ")");
   return (await res.text()).trim();
 }
 
