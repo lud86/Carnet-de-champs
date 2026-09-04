@@ -448,6 +448,7 @@
             </div>
             <dl class="kv">
               <dt>Dossier lié</dt><dd id="dataFolderName">Aucun</dd>
+              <dt>Dernière vérification du dossier</dt><dd id="lastFolderScan">—</dd>
               <dt>Fichier de données</dt><dd><code>carnet-donnees.json</code></dd>
               <dt>Dernière sauvegarde</dt><dd id="lastSaved">—</dd>
               <dt>Adresse actuelle</dt><dd><code id="currentOrigin"></code></dd>
@@ -456,8 +457,12 @@
               Pour que la liaison au dossier reste stable d'une session à l'autre, lance l'appli via
               <strong>Lancer-Carnet-de-Champs.bat</strong> plutôt qu'en double-cliquant directement sur le fichier HTML —
               ça ouvre l'appli sur une adresse locale fixe (<code>http://localhost:8743</code>) que le navigateur
-              retient mieux qu'un fichier ouvert directement.
+              retient mieux qu'un fichier ouvert directement. Le dossier est revérifié automatiquement toutes
+              les minutes ; le bouton ci-dessous permet de forcer une vérification immédiate.
             </p>
+            <div class="actions-row" style="padding-top:0;">
+              <button class="btn small" id="btnRefreshFolder">Revérifier le dossier maintenant</button>
+            </div>
           </div>
           <div class="actions-row">
             <button class="btn" id="btnExportJson">Exporter les données (.json)</button>
@@ -782,7 +787,7 @@ function parseFieldKml(text, fallbackName){
   return { name: fieldName, boundary, areaHa };
 }
 
-function upsertFieldFromKml(parsed, sourceLabel){
+function upsertFieldFromKml(parsed, sourceLabel, origin){
   // clé stable = nom du champ (normalisé)
   const key = parsed.name.trim().toLowerCase();
   let existing = Object.values(state.fields).find(f=>f.name.trim().toLowerCase()===key);
@@ -790,14 +795,37 @@ function upsertFieldFromKml(parsed, sourceLabel){
     existing.boundary = parsed.boundary.length ? parsed.boundary : existing.boundary;
     if(parsed.areaHa) existing.areaHa = parsed.areaHa;
     existing.source = sourceLabel;
+    existing.origin = origin;
+    existing.archived = false;
   } else {
     const id = uid();
     state.fields[id] = {
       id, name: parsed.name, client: '',
       boundary: parsed.boundary, areaHa: parsed.areaHa || null,
-      source: sourceLabel,
+      source: sourceLabel, origin, archived: false,
     };
   }
+  return key;
+}
+
+/* retire (ou marque comme retirés) les champs importés depuis le dossier qui
+   n'ont plus été vus lors du dernier scan — garde l'historique si des
+   interventions existent déjà dessus */
+function reconcileFolderFields(seenKeys){
+  let removed = 0, archived = 0;
+  Object.values(state.fields).forEach(f=>{
+    if(f.origin !== 'folder') return; // ne touche pas aux imports manuels
+    const key = f.name.trim().toLowerCase();
+    if(seenKeys.has(key)) return;
+    const hasInterventions = state.interventions.some(i=>i.fieldId===f.id);
+    if(hasInterventions){
+      if(!f.archived){ f.archived = true; archived++; }
+    } else {
+      delete state.fields[f.id];
+      removed++;
+    }
+  });
+  return {removed, archived};
 }
 
 async function importKmlFiles(fileList){
@@ -806,7 +834,7 @@ async function importKmlFiles(fileList){
     try{
       const text = await file.text();
       const parsed = parseFieldKml(text, file.name.replace(/\.kml$/i,''));
-      upsertFieldFromKml(parsed, file.name);
+      upsertFieldFromKml(parsed, file.name, 'manual');
       count++;
     }catch(e){
       console.error('Erreur import', file.name, e);
@@ -848,7 +876,8 @@ async function scanDirectoryForFieldKml(handle, depth, counters){
         const text = await file.text();
         const parentLabel = handle.name ? handle.name : name;
         const parsed = parseFieldKml(text, parentLabel);
-        upsertFieldFromKml(parsed, parentLabel+'/'+name);
+        const key = upsertFieldFromKml(parsed, parentLabel+'/'+name, 'folder');
+        counters.seenKeys.add(key);
         counters.fieldsFound++;
       } else if(entry.kind === 'directory'){
         await scanDirectoryForFieldKml(entry, depth+1, counters);
@@ -896,30 +925,64 @@ async function connectToDirHandle(handle){
     toast("Nouveau fichier de données créé dans le dossier");
   }
 
-  // scan automatique des champs AgOpenGPS présents dans le dossier
-  const counters = {entriesSeen:0, kmlSeen:0, fieldsFound:0, errors:[]};
+  await refreshFieldsFromFolder(true);
+  startFolderAutoRefresh();
+}
+
+/* re-scanne le dossier lié et met à jour la liste des champs (ajouts,
+   mises à jour, et retraits si un champ a disparu du dossier).
+   showToast=true uniquement pour le premier scan (liaison manuelle) afin de
+   ne pas notifier l'utilisateur en continu pendant les scans automatiques. */
+async function refreshFieldsFromFolder(showToast){
+  if(!dirHandle) return;
+  const counters = {entriesSeen:0, kmlSeen:0, fieldsFound:0, errors:[], seenKeys:new Set()};
   try{
     await scanDirectoryForFieldKml(dirHandle, 0, counters);
   }catch(e){
     counters.errors.push('Erreur générale : '+(e.message||e.name));
   }
+  const {removed, archived} = reconcileFolderFields(counters.seenKeys);
 
   renderAll();
   scheduleSave();
+  document.getElementById('lastFolderScan').textContent = new Date().toLocaleTimeString('fr-FR');
 
-  if(counters.fieldsFound > 0){
-    toast(counters.fieldsFound+" champ(s) trouvé(s) dans « "+dirHandle.name+" »");
-  } else if(counters.entriesSeen === 0){
-    toast("Le dossier « "+dirHandle.name+" » semble vide ou inaccessible depuis ce navigateur.");
-  } else if(counters.kmlSeen === 0){
-    toast("Aucun fichier Field.kml trouvé dans « "+dirHandle.name+" » (parcouru : "+counters.entriesSeen+" élément(s)). Vérifie que c'est bien le bon dossier.");
-  } else {
-    toast("Field.kml trouvé(s) mais non exploitable(s) — voir la console (F12) pour le détail.");
+  if(showToast){
+    if(counters.fieldsFound > 0){
+      toast(counters.fieldsFound+" champ(s) trouvé(s) dans « "+dirHandle.name+" »");
+    } else if(counters.entriesSeen === 0){
+      toast("Le dossier « "+dirHandle.name+" » semble vide ou inaccessible depuis ce navigateur.");
+    } else if(counters.kmlSeen === 0){
+      toast("Aucun fichier Field.kml trouvé dans « "+dirHandle.name+" » (parcouru : "+counters.entriesSeen+" élément(s)). Vérifie que c'est bien le bon dossier.");
+    } else {
+      toast("Field.kml trouvé(s) mais non exploitable(s) — voir la console (F12) pour le détail.");
+    }
+  } else if(removed || archived){
+    let msg = [];
+    if(removed) msg.push(removed+" champ(s) retiré(s) (disparus du dossier)");
+    if(archived) msg.push(archived+" champ(s) marqué(s) comme retirés (historique conservé)");
+    toast(msg.join(' · '));
   }
   if(counters.errors.length){
     console.warn('Erreurs de scan :', counters.errors);
   }
 }
+
+let folderAutoRefreshTimer = null;
+function startFolderAutoRefresh(){
+  clearInterval(folderAutoRefreshTimer);
+  // toutes les 60 secondes tant qu'un dossier reste lié
+  folderAutoRefreshTimer = setInterval(()=>{
+    if(dirHandle) refreshFieldsFromFolder(false);
+  }, 60000);
+}
+// re-scan aussi quand l'onglet redevient visible (l'appli tourne en tâche de
+// fond entre-temps, un setInterval seul peut être mis en pause par le navigateur)
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'visible' && dirHandle){
+    refreshFieldsFromFolder(false);
+  }
+});
 
 /* tente de reconnecter automatiquement le dossier lié lors d'une session précédente */
 async function tryRestoreDirHandle(){
@@ -1013,13 +1076,14 @@ function renderFields(){
   } else {
     list.innerHTML = fields.map(f=>{
       const hasB = f.boundary && f.boundary.length;
-      return `<div class="field-row ${hasB?'has-boundary':'no-boundary'}">
+      const rowClass = f.archived ? 'no-boundary' : (hasB?'has-boundary':'no-boundary');
+      return `<div class="field-row ${rowClass}" style="${f.archived?'opacity:.55;':''}">
         <div style="flex:1;">
-          <div class="fname">${escapeHtml(f.name)}</div>
+          <div class="fname">${escapeHtml(f.name)} ${f.archived ? '<span class="badge warn">retiré du dossier</span>' : ''}</div>
           <div class="fmeta">${f.areaHa ? f.areaHa.toFixed(2).replace('.',',')+' ha · ' : ''}${hasB ? 'bordure tracée' : 'pas de bordure tracée'}</div>
         </div>
         <input class="client-input" data-field="${f.id}" placeholder="Client" value="${escapeHtml(f.client||'')}">
-        <button class="btn small" data-add-interv="${f.id}" title="Ajouter une intervention pour ce champ">+ Intervention</button>
+        ${f.archived ? '' : `<button class="btn small" data-add-interv="${f.id}" title="Ajouter une intervention pour ce champ">+ Intervention</button>`}
       </div>`;
     }).join('');
     list.querySelectorAll('[data-add-interv]').forEach(btn=>{
@@ -1119,9 +1183,10 @@ function refreshFieldSelects(){
   const champSel = document.getElementById('fChamp');
   const filterField = document.getElementById('filterField');
   const fields = fieldsArray();
-  const opts = fields.map(f=>`<option value="${f.id}">${escapeHtml(f.name)}</option>`).join('');
-  champSel.innerHTML = opts || '<option value="">Aucun champ</option>';
-  filterField.innerHTML = '<option value="">Tous</option>' + opts;
+  const activeOpts = fields.filter(f=>!f.archived).map(f=>`<option value="${f.id}">${escapeHtml(f.name)}</option>`).join('');
+  const allOpts = fields.map(f=>`<option value="${f.id}">${escapeHtml(f.name)}${f.archived?' (retiré)':''}</option>`).join('');
+  champSel.innerHTML = activeOpts || '<option value="">Aucun champ</option>';
+  filterField.innerHTML = '<option value="">Tous</option>' + allOpts;
 }
 
 function refreshTypeSelect(){
@@ -1357,6 +1422,7 @@ function renderAll(){
    ÉVÉNEMENTS UI
    ============================================================ */
 document.getElementById('btnPickFolder').addEventListener('click', pickFolder);
+document.getElementById('btnRefreshFolder').addEventListener('click', ()=>refreshFieldsFromFolder(true));
 document.getElementById('btnGoToGithub').addEventListener('click', ()=>{
   document.querySelector('.tab-btn[data-view="donnees"]').click();
   document.getElementById('ghRepo').scrollIntoView({behavior:'smooth', block:'center'});
