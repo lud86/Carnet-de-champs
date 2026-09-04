@@ -6,8 +6,6 @@
 <title>Carnet de Champs — Traçabilité parcellaire</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.7.1/lib/msal-browser.min.js"
-  onerror="var s=document.createElement('script');s.src='https://unpkg.com/@azure/msal-browser@3.7.1/lib/msal-browser.min.js';document.head.appendChild(s);"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -246,8 +244,8 @@
       </div>
       <div class="conn-status">
         <span class="conn-dot off" id="odDot"></span>
-        <span id="odLabel">OneDrive non connecté</span>
-        <button class="btn ghost small" id="btnOneDrive">Connexion OneDrive</button>
+        <span id="odLabel">GitHub non connecté</span>
+        <button class="btn ghost small" id="btnGoToGithub">Connexion GitHub</button>
       </div>
     </div>
   </header>
@@ -412,7 +410,36 @@
         </div>
 
         <div class="panel">
-          <div class="panel-title">Stockage local</div>
+          <div class="panel-title">Synchronisation multi-appareils (GitHub)</div>
+          <div class="panel-body">
+            <p class="sub" style="margin-top:0;">
+              Stocke les données (champs, interventions, types) dans un fichier sur un dépôt GitHub
+              <strong>privé</strong>, pour les retrouver sur tous tes appareils, y compris ton téléphone.
+              Utilise un dépôt séparé de celui qui héberge l'appli — tes données de facturation ne doivent pas être publiques.
+            </p>
+            <div class="interv-form" style="grid-template-columns:1fr 1fr;">
+              <div>
+                <label class="field-label">Propriétaire / dépôt</label>
+                <input type="text" id="ghRepo" placeholder="ex. lud86/carnet-de-champs-data">
+              </div>
+              <div>
+                <label class="field-label">Chemin du fichier</label>
+                <input type="text" id="ghPath" placeholder="carnet-donnees.json" value="carnet-donnees.json">
+              </div>
+              <div class="full">
+                <label class="field-label">Jeton d'accès personnel (Personal Access Token)</label>
+                <input type="password" id="ghToken" placeholder="ghp_...">
+              </div>
+              <div class="full" style="display:flex;gap:10px;">
+                <button class="btn primary" id="btnGhConnect">Connecter</button>
+                <button class="btn" id="btnGhDisconnect">Déconnecter</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Stockage local (tablette)</div>
           <div class="panel-body">
             <div class="warning-box" id="fsApiWarning" style="display:none;">
               Ce navigateur ne permet pas l'écriture directe dans un dossier. Utilise les boutons
@@ -487,148 +514,162 @@ let dirHandle = null;       // File System Access API directory handle
 let fileHandle = null;      // handle to carnet-donnees.json inside dirHandle
 let map, layerGroup;
 let saveTimer = null;
-let graphSaveTimer = null;
+let ghSaveTimer = null;
 
 const fsApiSupported = 'showDirectoryPicker' in window;
 
 /* ============================================================
-   CONNEXION ONEDRIVE (Microsoft Graph via MSAL)
+   SYNCHRONISATION GITHUB (multi-appareils, dépôt privé)
    ============================================================ */
-const MSAL_CONFIG = {
-  auth: {
-    clientId: "953049cd-8a7a-4187-bcf2-07993ceaaefb",
-    authority: "https://login.microsoftonline.com/consumers",
-    redirectUri: "https://lud86.github.io/Carnet-de-champs/",
-  },
-  cache: {
-    // localStorage volontairement : cette appli est une vraie appli web déployée
-    // (GitHub Pages), utilisée sur téléphone — on veut que la connexion survive
-    // à la fermeture du navigateur.
-    cacheLocation: "localStorage",
-    storeAuthStateInCookie: false,
-  }
-};
-const GRAPH_SCOPES = ["Files.ReadWrite"];
-const GRAPH_DATA_PATH = "/me/drive/root:/CarnetDeChamps/carnet-donnees.json";
+const GH_CONFIG_KEY = "carnet-de-champs-gh-config";
+let ghConfig = null;     // {repo: "owner/name", path: "...", token: "..."}
+let ghSha = null;        // sha du fichier distant, nécessaire pour le mettre à jour
 
-let msalInstance = null;
-let graphAccount = null;
-
-async function initMsal(){
-  if(typeof msal === 'undefined'){
-    console.warn("MSAL non chargé (hors-ligne ?)");
-    return;
-  }
-  msalInstance = new msal.PublicClientApplication(MSAL_CONFIG);
-  await msalInstance.initialize();
-
-  try{
-    const result = await msalInstance.handleRedirectPromise();
-    if(result && result.account){
-      graphAccount = result.account;
-    }
-  }catch(e){
-    console.error("Erreur retour de connexion Microsoft", e);
-    toast("Échec de la connexion Microsoft — réessaie.");
-  }
-
-  if(!graphAccount){
-    const accounts = msalInstance.getAllAccounts();
-    if(accounts.length) graphAccount = accounts[0];
-  }
-
-  if(graphAccount){
-    msalInstance.setActiveAccount(graphAccount);
-    updateOneDriveUI(true);
-    await graphLoadIntoState();
-  }
+// encodage/décodage base64 correct pour du texte UTF-8 (accents, etc.)
+function utf8ToBase64(str){
+  return btoa(unescape(encodeURIComponent(str)));
+}
+function base64ToUtf8(str){
+  return decodeURIComponent(escape(atob(str)));
 }
 
-function updateOneDriveUI(connected){
+function loadGhConfig(){
+  try{
+    const raw = localStorage.getItem(GH_CONFIG_KEY);
+    return raw ? JSON.parse(raw) : null;
+  }catch(e){ return null; }
+}
+function saveGhConfig(cfg){
+  localStorage.setItem(GH_CONFIG_KEY, JSON.stringify(cfg));
+}
+function clearGhConfig(){
+  localStorage.removeItem(GH_CONFIG_KEY);
+}
+
+function updateGithubUI(connected){
   document.getElementById('odDot').className = 'conn-dot ' + (connected ? 'on' : 'off');
   document.getElementById('odLabel').textContent = connected
-    ? ('OneDrive : ' + (graphAccount ? graphAccount.username : 'connecté'))
-    : 'OneDrive non connecté';
-  document.getElementById('btnOneDrive').textContent = connected ? 'Déconnecter' : 'Connexion OneDrive';
+    ? ('GitHub : ' + ghConfig.repo)
+    : 'GitHub non connecté';
 }
 
-async function connectOneDrive(){
-  if(!msalInstance){ toast("Connexion Microsoft indisponible pour l'instant."); return; }
-  if(graphAccount){
-    // déconnexion
-    msalInstance.setActiveAccount(null);
-    graphAccount = null;
-    updateOneDriveUI(false);
-    toast("Déconnecté de OneDrive");
+async function ghApiFetch(method, body){
+  const url = `https://api.github.com/repos/${ghConfig.repo}/contents/${ghConfig.path}`;
+  const opts = {
+    method,
+    headers: {
+      "Authorization": "Bearer " + ghConfig.token,
+      "Accept": "application/vnd.github+json",
+    }
+  };
+  if(body){
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(body);
+  }
+  return fetch(url, opts);
+}
+
+async function connectGithub(){
+  const repo = document.getElementById('ghRepo').value.trim();
+  const path = document.getElementById('ghPath').value.trim() || 'carnet-donnees.json';
+  const token = document.getElementById('ghToken').value.trim();
+
+  if(!repo || !repo.includes('/')){
+    toast("Indique le dépôt au format propriétaire/nom (ex. lud86/carnet-de-champs-data)");
     return;
   }
-  try{
-    await msalInstance.loginRedirect({scopes: GRAPH_SCOPES});
-    // la page se recharge ici (flux redirect) ; la suite se passe dans initMsal()
-  }catch(e){
-    console.error(e);
-    toast("Échec de la connexion Microsoft");
+  if(!token){
+    toast("Le jeton d'accès personnel est requis");
+    return;
   }
-}
+  ghConfig = {repo, path, token};
 
-async function getGraphToken(){
-  if(!msalInstance || !graphAccount) return null;
   try{
-    const res = await msalInstance.acquireTokenSilent({scopes: GRAPH_SCOPES, account: graphAccount});
-    return res.accessToken;
-  }catch(e){
-    try{
-      const res = await msalInstance.acquireTokenRedirect({scopes: GRAPH_SCOPES});
-      return null; // redirection en cours, la page va se recharger
-    }catch(e2){
-      console.error("Impossible d'obtenir un jeton Graph", e2);
-      return null;
-    }
-  }
-}
-
-async function graphLoadIntoState(){
-  const token = await getGraphToken();
-  if(!token) return;
-  try{
-    const res = await fetch("https://graph.microsoft.com/v1.0" + GRAPH_DATA_PATH + ":/content", {
-      headers: {Authorization: "Bearer " + token}
-    });
+    const res = await ghApiFetch('GET');
     if(res.status === 404){
-      // rien encore sur OneDrive : on y met l'état actuel comme point de départ
-      await graphSaveNow();
+      // rien encore sur GitHub : on y crée le fichier avec l'état actuel
+      ghSha = null;
+      await ghSaveNow();
+      saveGhConfig(ghConfig);
+      updateGithubUI(true);
+      toast("Connecté à GitHub — fichier de données créé");
       return;
     }
-    if(!res.ok) throw new Error("Graph GET " + res.status);
-    const loaded = await res.json();
+    if(res.status === 401 || res.status === 403){
+      toast("Jeton refusé — vérifie qu'il a bien la permission sur les dépôts privés");
+      return;
+    }
+    if(!res.ok) throw new Error("GitHub GET " + res.status);
+    const data = await res.json();
+    ghSha = data.sha;
+    const loaded = JSON.parse(base64ToUtf8(data.content.replace(/\n/g,'')));
     state = normalizeState(loaded);
     renderAll();
-    toast("Données chargées depuis OneDrive");
+    saveGhConfig(ghConfig);
+    updateGithubUI(true);
+    toast("Données chargées depuis GitHub");
   }catch(e){
-    console.error("Erreur de lecture OneDrive", e);
-    toast("Impossible de charger les données depuis OneDrive");
+    console.error(e);
+    toast("Connexion GitHub impossible — vérifie le dépôt et le jeton");
+    ghConfig = null;
   }
 }
 
-async function graphSaveNow(){
-  const token = await getGraphToken();
-  if(!token) return;
+function disconnectGithub(){
+  ghConfig = null;
+  ghSha = null;
+  clearGhConfig();
+  updateGithubUI(false);
+  toast("Déconnecté de GitHub");
+}
+
+async function ghSaveNow(){
+  if(!ghConfig) return;
   try{
-    const res = await fetch("https://graph.microsoft.com/v1.0" + GRAPH_DATA_PATH + ":/content", {
-      method: "PUT",
-      headers: {Authorization: "Bearer " + token, "Content-Type": "application/json"},
-      body: JSON.stringify(state)
-    });
-    if(!res.ok) throw new Error("Graph PUT " + res.status);
+    const body = {
+      message: "Mise à jour depuis Carnet de Champs",
+      content: utf8ToBase64(JSON.stringify(state, null, 2)),
+    };
+    if(ghSha) body.sha = ghSha;
+    const res = await ghApiFetch('PUT', body);
+    if(!res.ok){
+      const err = await res.json().catch(()=>({}));
+      throw new Error("GitHub PUT " + res.status + " " + (err.message||''));
+    }
+    const data = await res.json();
+    ghSha = data.content.sha;
   }catch(e){
-    console.error("Erreur de sauvegarde OneDrive", e);
+    console.error("Erreur de sauvegarde GitHub", e);
+    toast("Échec de la sauvegarde GitHub — la donnée reste en local pour l'instant");
   }
 }
 
-function scheduleGraphSave(){
-  if(!graphAccount) return;
-  clearTimeout(graphSaveTimer);
-  graphSaveTimer = setTimeout(graphSaveNow, 800);
+function scheduleGhSave(){
+  if(!ghConfig) return;
+  clearTimeout(ghSaveTimer);
+  ghSaveTimer = setTimeout(ghSaveNow, 800);
+}
+
+async function tryRestoreGithub(){
+  const cfg = loadGhConfig();
+  if(!cfg) return;
+  document.getElementById('ghRepo').value = cfg.repo;
+  document.getElementById('ghPath').value = cfg.path;
+  document.getElementById('ghToken').value = cfg.token;
+  ghConfig = cfg;
+  try{
+    const res = await ghApiFetch('GET');
+    if(!res.ok) throw new Error("GitHub GET " + res.status);
+    const data = await res.json();
+    ghSha = data.sha;
+    const loaded = JSON.parse(base64ToUtf8(data.content.replace(/\n/g,'')));
+    state = normalizeState(loaded);
+    renderAll();
+    updateGithubUI(true);
+  }catch(e){
+    console.error("Reconnexion GitHub échouée", e);
+    updateGithubUI(false);
+  }
 }
 
 /* ---- persistance du handle de dossier entre sessions (IndexedDB) ---- */
@@ -917,7 +958,7 @@ function showReconnectBanner(handle){
 
 function scheduleSave(){
   document.getElementById('lastSaved').textContent = new Date().toLocaleString('fr-FR');
-  scheduleGraphSave();
+  scheduleGhSave();
   if(!fileHandle) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async ()=>{
@@ -1316,7 +1357,12 @@ function renderAll(){
    ÉVÉNEMENTS UI
    ============================================================ */
 document.getElementById('btnPickFolder').addEventListener('click', pickFolder);
-document.getElementById('btnOneDrive').addEventListener('click', connectOneDrive);
+document.getElementById('btnGoToGithub').addEventListener('click', ()=>{
+  document.querySelector('.tab-btn[data-view="donnees"]').click();
+  document.getElementById('ghRepo').scrollIntoView({behavior:'smooth', block:'center'});
+});
+document.getElementById('btnGhConnect').addEventListener('click', connectGithub);
+document.getElementById('btnGhDisconnect').addEventListener('click', disconnectGithub);
 
 document.getElementById('btnImportKmlManual').addEventListener('click', ()=>{
   document.getElementById('fileKmlInput').click();
@@ -1368,7 +1414,7 @@ initMap();
 renderAll();
 document.getElementById('fDate').valueAsDate = new Date();
 tryRestoreDirHandle();
-initMsal();
+tryRestoreGithub();
 
 document.getElementById('currentOrigin').textContent = location.origin === 'null' ? 'file:// (page ouverte directement)' : location.origin;
 if(location.protocol === 'file:'){
