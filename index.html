@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Carnet de Champs — Traçabilité parcellaire</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#20301f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Carnet de Champs">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png" type="image/png">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -247,7 +255,7 @@
         <span id="odLabel">GitHub non connecté</span>
         <button class="btn ghost small" id="btnGoToGithub">Connexion GitHub</button>
       </div>
-      <span style="font-size:10px;color:#8a9280;">v2026-09-04-3</span>
+      <span style="font-size:10px;color:#8a9280;">v2026-09-04-4</span>
     </div>
   </header>
 
@@ -1631,6 +1639,12 @@ document.getElementById('fDate').valueAsDate = new Date();
   await tryRestoreGithub();
   await tryRestoreDirHandle();
 })();
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('sw.js').catch(e=>console.warn('Service worker non enregistré', e));
+  });
+}
 
 document.getElementById('currentOrigin').textContent = location.origin === 'null' ? 'file:// (page ouverte directement)' : location.origin;
 if(location.protocol === 'file:'){
