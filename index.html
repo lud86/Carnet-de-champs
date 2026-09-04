@@ -626,6 +626,7 @@ async function connectGithub(){
     }
     const loaded = JSON.parse(decoded);
     state = normalizeState(loaded);
+    if(dirHandle) await refreshFieldsFromFolder(false); // refusionne les champs du dossier déjà lié
     renderAll();
     saveGhConfig(ghConfig);
     updateGithubUI(true);
@@ -938,17 +939,29 @@ async function connectToDirHandle(handle){
   document.getElementById('dataFolderName').textContent = dirHandle.name;
   document.getElementById('reconnectBanner').style.display = 'none';
 
-  // charger les données existantes si présentes
-  try{
-    fileHandle = await dirHandle.getFileHandle('carnet-donnees.json');
-    const file = await fileHandle.getFile();
-    const text = await file.text();
-    const loaded = JSON.parse(text);
-    state = normalizeState(loaded);
-    toast("Données chargées depuis le dossier");
-  }catch(e){
-    fileHandle = await dirHandle.getFileHandle('carnet-donnees.json', {create:true});
-    toast("Nouveau fichier de données créé dans le dossier");
+  if(ghConfig){
+    // GitHub est déjà la source de vérité partagée entre appareils : on ne
+    // remplace pas l'état par le fichier local, on se contente d'assurer
+    // qu'il existe pour servir de sauvegarde passive.
+    try{
+      fileHandle = await dirHandle.getFileHandle('carnet-donnees.json');
+    }catch(e){
+      fileHandle = await dirHandle.getFileHandle('carnet-donnees.json', {create:true});
+    }
+  } else {
+    // pas de GitHub configuré : le fichier local du dossier est la seule
+    // source disponible, on le charge normalement
+    try{
+      fileHandle = await dirHandle.getFileHandle('carnet-donnees.json');
+      const file = await fileHandle.getFile();
+      const text = await file.text();
+      const loaded = JSON.parse(text);
+      state = normalizeState(loaded);
+      toast("Données chargées depuis le dossier");
+    }catch(e){
+      fileHandle = await dirHandle.getFileHandle('carnet-donnees.json', {create:true});
+      toast("Nouveau fichier de données créé dans le dossier");
+    }
   }
 
   await refreshFieldsFromFolder(true);
@@ -1511,8 +1524,10 @@ if(!fsApiSupported){
 initMap();
 renderAll();
 document.getElementById('fDate').valueAsDate = new Date();
-tryRestoreDirHandle();
-tryRestoreGithub();
+(async function initConnections(){
+  await tryRestoreGithub();
+  await tryRestoreDirHandle();
+})();
 
 document.getElementById('currentOrigin').textContent = location.origin === 'null' ? 'file:// (page ouverte directement)' : location.origin;
 if(location.protocol === 'file:'){
