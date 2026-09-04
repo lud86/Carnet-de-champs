@@ -438,6 +438,7 @@
                 <button class="btn" id="btnGhDisconnect">Déconnecter</button>
               </div>
             </div>
+            <p class="sub" id="ghSyncStatus" style="margin:10px 0 0;"></p>
           </div>
         </div>
 
@@ -630,6 +631,7 @@ async function connectGithub(){
     renderAll();
     saveGhConfig(ghConfig);
     updateGithubUI(true);
+    document.getElementById('ghSyncStatus').textContent = "Chargé depuis GitHub : "+Object.keys(state.fields).length+" champ(s), "+state.interventions.length+" intervention(s)";
     toast("Données chargées depuis GitHub");
   }catch(e){
     console.error(e);
@@ -646,7 +648,7 @@ function disconnectGithub(){
   toast("Déconnecté de GitHub");
 }
 
-async function ghSaveNow(){
+async function ghSaveNow(retrying){
   if(!ghConfig) return;
   try{
     const body = {
@@ -655,15 +657,32 @@ async function ghSaveNow(){
     };
     if(ghSha) body.sha = ghSha;
     const res = await ghApiFetch('PUT', body);
+    if(res.status === 409 && !retrying){
+      // conflit : un autre appareil a écrit entre-temps — on récupère le sha
+      // à jour et on réessaie une fois, sans perdre les modifications locales
+      const fresh = await ghApiFetch('GET');
+      if(fresh.ok){
+        const freshData = await fresh.json();
+        ghSha = freshData.sha;
+        return ghSaveNow(true);
+      }
+    }
     if(!res.ok){
       const err = await res.json().catch(()=>({}));
-      throw new Error("GitHub PUT " + res.status + " " + (err.message||''));
+      throw new Error(res.status + (err.message ? " — "+err.message : ''));
     }
     const data = await res.json();
     ghSha = data.content.sha;
+    const statusEl = document.getElementById('ghSyncStatus');
+    if(statusEl){
+      statusEl.textContent = "Dernier envoi réussi : "+new Date().toLocaleTimeString('fr-FR')
+        +" — "+Object.keys(state.fields).length+" champ(s), "+state.interventions.length+" intervention(s)";
+    }
   }catch(e){
     console.error("Erreur de sauvegarde GitHub", e);
-    toast("Échec de la sauvegarde GitHub — la donnée reste en local pour l'instant");
+    toast("Échec de la sauvegarde GitHub : " + (e.message || e));
+    const statusEl = document.getElementById('ghSyncStatus');
+    if(statusEl) statusEl.textContent = "Échec du dernier envoi ("+new Date().toLocaleTimeString('fr-FR')+") : "+(e.message||e);
   }
 }
 
@@ -973,7 +992,10 @@ async function connectToDirHandle(handle){
    showToast=true uniquement pour le premier scan (liaison manuelle) afin de
    ne pas notifier l'utilisateur en continu pendant les scans automatiques. */
 async function refreshFieldsFromFolder(showToast){
-  if(!dirHandle) return;
+  if(!dirHandle){
+    if(showToast) toast("Aucun dossier lié pour l'instant — clique sur « Lier un dossier » ou « Reconnecter le dossier » d'abord.");
+    return;
+  }
   const counters = {entriesSeen:0, kmlSeen:0, fieldsFound:0, errors:[], seenKeys:new Set()};
   try{
     await scanDirectoryForFieldKml(dirHandle, 0, counters);
