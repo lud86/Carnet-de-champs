@@ -247,7 +247,7 @@
         <span id="odLabel">GitHub non connecté</span>
         <button class="btn ghost small" id="btnGoToGithub">Connexion GitHub</button>
       </div>
-      <span style="font-size:10px;color:#8a9280;">v2026-09-04-1</span>
+      <span style="font-size:10px;color:#8a9280;">v2026-09-04-2</span>
     </div>
   </header>
 
@@ -585,6 +585,22 @@ async function ghApiFetch(method, body){
 /* recharge l'état depuis GitHub (sha inchangé = pas de conflit possible en lecture).
    silent=true : pas de toast si rien de neuf (utilisé pour les vérifications
    automatiques en arrière-plan). */
+/* Récupère le contenu réel d'un fichier via son download_url plutôt que le
+   champ "content" (base64) de l'API Contents, qui est omis ou tronqué par
+   GitHub au-delà d'environ 1 Mo. */
+async function ghFetchContent(meta){
+  if(!meta.download_url){
+    // fallback : ancien comportement (petits fichiers)
+    return base64ToUtf8((meta.content||'').replace(/\n/g,'')).trim();
+  }
+  const res = await fetch(meta.download_url + (meta.download_url.includes('?') ? '&' : '?') + 't=' + Date.now(), {
+    cache: "no-store",
+    headers: {"Authorization": "Bearer " + ghConfig.token}
+  });
+  if(!res.ok) throw new Error("Téléchargement du fichier impossible (" + res.status + ")");
+  return (await res.text()).trim();
+}
+
 async function ghLoadNow(silent){
   if(!ghConfig) return;
   try{
@@ -600,7 +616,7 @@ async function ghLoadNow(silent){
       return;
     }
     ghSha = data.sha;
-    const decoded = base64ToUtf8(data.content.replace(/\n/g,'')).trim();
+    const decoded = await ghFetchContent(data);
     if(decoded){
       const loaded = JSON.parse(decoded);
       state = normalizeState(loaded);
@@ -655,7 +671,7 @@ async function connectGithub(){
     }
     const data = await res.json();
     ghSha = data.sha;
-    const decoded = base64ToUtf8(data.content.replace(/\n/g,'')).trim();
+    const decoded = await ghFetchContent(data);
     if(!decoded){
       // fichier existant mais vide : on l'initialise avec l'état actuel
       await ghSaveNow(false, true);
@@ -766,7 +782,7 @@ async function tryRestoreGithub(){
     }
     const data = await res.json();
     ghSha = data.sha;
-    const decoded = base64ToUtf8(data.content.replace(/\n/g,'')).trim();
+    const decoded = await ghFetchContent(data);
     if(!decoded){
       updateGithubUI(true);
       startGhAutoRefresh();
