@@ -633,7 +633,7 @@ async function connectGithub(){
     if(res.status === 404){
       // rien encore sur GitHub : on y crée le fichier avec l'état actuel
       ghSha = null;
-      await ghSaveNow();
+      await ghSaveNow(false, true);
       saveGhConfig(ghConfig);
       updateGithubUI(true);
       startGhAutoRefresh();
@@ -655,7 +655,7 @@ async function connectGithub(){
     const decoded = base64ToUtf8(data.content.replace(/\n/g,'')).trim();
     if(!decoded){
       // fichier existant mais vide : on l'initialise avec l'état actuel
-      await ghSaveNow();
+      await ghSaveNow(false, true);
       saveGhConfig(ghConfig);
       updateGithubUI(true);
       startGhAutoRefresh();
@@ -686,8 +686,16 @@ function disconnectGithub(){
   toast("Déconnecté de GitHub");
 }
 
-async function ghSaveNow(retrying){
+async function ghSaveNow(retrying, allowEmpty){
   if(!ghConfig) return;
+  const isEmpty = Object.keys(state.fields).length === 0 && state.interventions.length === 0;
+  if(isEmpty && !allowEmpty){
+    // garde-fou : on ne pousse jamais un état vide vers GitHub sauf demande
+    // explicite (première initialisation) — ça évite d'écraser des données
+    // existantes si l'état local n'a pas encore fini de se charger.
+    console.warn("Envoi GitHub bloqué : état local vide (protection anti-écrasement)");
+    return;
+  }
   try{
     const body = {
       message: "Mise à jour depuis Carnet de Champs",
@@ -702,7 +710,7 @@ async function ghSaveNow(retrying){
       if(fresh.ok){
         const freshData = await fresh.json();
         ghSha = freshData.sha;
-        return ghSaveNow(true);
+        return ghSaveNow(true, allowEmpty);
       }
     }
     if(!res.ok){
