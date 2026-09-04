@@ -564,9 +564,11 @@ function updateGithubUI(connected){
 }
 
 async function ghApiFetch(method, body){
-  const url = `https://api.github.com/repos/${ghConfig.repo}/contents/${ghConfig.path}`;
+  const cacheBust = method === 'GET' ? (`?t=${Date.now()}`) : '';
+  const url = `https://api.github.com/repos/${ghConfig.repo}/contents/${ghConfig.path}${cacheBust}`;
   const opts = {
     method,
+    cache: "no-store",
     headers: {
       "Authorization": "Bearer " + ghConfig.token,
       "Accept": "application/vnd.github+json",
