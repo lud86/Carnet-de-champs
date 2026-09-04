@@ -247,6 +247,7 @@
         <span id="odLabel">GitHub non connecté</span>
         <button class="btn ghost small" id="btnGoToGithub">Connexion GitHub</button>
       </div>
+      <span style="font-size:10px;color:#8a9280;">v2026-09-04-1</span>
     </div>
   </header>
 
@@ -696,6 +697,8 @@ async function ghSaveNow(retrying, allowEmpty){
     // explicite (première initialisation) — ça évite d'écraser des données
     // existantes si l'état local n'a pas encore fini de se charger.
     console.warn("Envoi GitHub bloqué : état local vide (protection anti-écrasement)");
+    const statusEl = document.getElementById('ghSyncStatus');
+    if(statusEl) statusEl.textContent = "Envoi bloqué ("+new Date().toLocaleTimeString('fr-FR')+") : l'état local est vide, protection anti-écrasement activée.";
     return;
   }
   try{
