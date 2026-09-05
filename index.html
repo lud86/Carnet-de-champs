@@ -257,7 +257,7 @@
         <span id="odLabel">GitHub non connecté</span>
         <button class="btn ghost small" id="btnGoToGithub">Connexion GitHub</button>
       </div>
-      <span style="font-size:10px;color:#8a9280;">v2026-09-05-1</span>
+      <span style="font-size:10px;color:#8a9280;">v2026-09-04-6</span>
     </div>
   </header>
 
@@ -474,35 +474,9 @@
               Ils contiennent une ligne à chaque ouverture/fermeture de champ, avec la date et l'heure — ça permet de
               calculer combien de temps a été passé sur chaque champ, à chaque session.
             </p>
-            <div class="conn-status" style="margin-bottom:12px;">
-              <span class="conn-dot off" id="logsConnDot"></span>
-              <span id="logsConnLabel">Aucun dossier de journaux lié</span>
-              <button class="btn small" id="btnPickLogsFolder">Lier le dossier Logs</button>
-            </div>
-            <p class="sub" style="margin:0 0 12px;">
-              Une fois lié (sur la tablette), les journaux sont revérifiés automatiquement — les sessions calculées
-              partent vers GitHub comme le reste des données, donc elles arrivent aussi sur le téléphone sans rien faire de plus.
-            </p>
-
-            <div class="warning-box" style="margin-bottom:12px;">
-              <strong>Expérimental</strong> — pour que le téléphone récupère les journaux directement depuis OneDrive,
-              sans passer par une tablette. Ça peut ne pas fonctionner (blocage de sécurité navigateur) ; la synchro
-              GitHub ci-dessus reste la solution fiable dans tous les cas.
-            </div>
-            <div class="interv-form" style="grid-template-columns:1fr auto;margin-bottom:8px;">
-              <div>
-                <label class="field-label">Lien de partage OneDrive du dossier Logs (lecture seule)</label>
-                <input type="text" id="oneDriveShareUrl" placeholder="https://1drv.ms/f/c/...">
-              </div>
-              <div style="display:flex;align-items:end;">
-                <button class="btn" id="btnFetchOneDriveShare">Récupérer maintenant</button>
-              </div>
-            </div>
-            <p class="sub" id="oneDriveShareStatus" style="margin:0 0 12px;"></p>
-
             <div style="display:flex;gap:12px;align-items:end;flex-wrap:wrap;">
               <div>
-                <button class="btn" id="btnImportLogs">Importer des journaux à la main (.txt)</button>
+                <button class="btn" id="btnImportLogs">Importer des journaux (.txt)</button>
                 <input type="file" id="fileLogsInput" accept=".txt" multiple style="display:none;">
               </div>
               <div>
@@ -669,12 +643,11 @@ let state = {
 /* remet en forme un état chargé (fichier JSON ou dossier) : gère les anciennes
    données où "types" était un simple tableau de chaînes */
 function normalizeState(loaded){
-  const merged = Object.assign({fields:{},interventions:[],types:[...DEFAULT_TYPES],companyInfo:{name:'',address:'',siret:''},logSessions:[]}, loaded);
+  const merged = Object.assign({fields:{},interventions:[],types:[...DEFAULT_TYPES],companyInfo:{name:'',address:'',siret:''}}, loaded);
   if(Array.isArray(merged.types)){
     merged.types = merged.types.map(t => typeof t === 'string' ? {name:t, price:null} : t);
   }
   if(!merged.companyInfo) merged.companyInfo = {name:'',address:'',siret:''};
-  if(!Array.isArray(merged.logSessions)) merged.logSessions = [];
   return merged;
 }
 
@@ -1282,7 +1255,6 @@ function startFolderAutoRefresh(){
 document.addEventListener('visibilitychange', ()=>{
   if(document.visibilityState === 'visible'){
     if(dirHandle) refreshFieldsFromFolder(false);
-    if(logsDirHandle) refreshLogsFromFolder(false);
     if(ghConfig) ghLoadNow(true);
   }
 });
@@ -1858,14 +1830,6 @@ function renderAll(){
   renderTypes();
   renderInterventions();
   renderCompanyInfo();
-  hydrateLogSessionsFromState();
-}
-
-function hydrateLogSessionsFromState(){
-  logSessions = (state.logSessions||[]).map(s=>({
-    fieldName: s.fieldName, start: new Date(s.start), end: new Date(s.end), durationMin: s.durationMin,
-  }));
-  renderLogSessions();
 }
 
 function renderCompanyInfo(){
@@ -1879,8 +1843,6 @@ function renderCompanyInfo(){
    ÉVÉNEMENTS UI
    ============================================================ */
 document.getElementById('btnPickFolder').addEventListener('click', pickFolder);
-document.getElementById('btnPickLogsFolder').addEventListener('click', pickLogsFolder);
-document.getElementById('btnFetchOneDriveShare').addEventListener('click', fetchOneDriveShareLogs);
 document.getElementById('btnRefreshFolder').addEventListener('click', ()=>refreshFieldsFromFolder(true));
 document.getElementById('btnGoToGithub').addEventListener('click', ()=>{
   document.querySelector('.tab-btn[data-view="donnees"]').click();
@@ -1972,95 +1934,6 @@ const AOG_LOG_LINE_RE = new RegExp(
 );
 
 let logSessions = []; // {fieldName, start:Date, end:Date, durationMin}
-let logsDirHandle = null;
-let logsAutoRefreshTimer = null;
-
-async function pickLogsFolder(){
-  if(!fsApiSupported){
-    toast("Ce navigateur ne supporte pas la liaison directe à un dossier — utilise l'import manuel.");
-    return;
-  }
-  try{
-    const handle = await window.showDirectoryPicker();
-    await idbSet('logsDir', handle);
-    await connectLogsDirHandle(handle);
-  }catch(e){
-    if(e.name !== 'AbortError') console.error(e);
-  }
-}
-
-async function connectLogsDirHandle(handle){
-  logsDirHandle = handle;
-  document.getElementById('logsConnDot').className = 'conn-dot on';
-  document.getElementById('logsConnLabel').textContent = 'Dossier lié : '+handle.name;
-  await refreshLogsFromFolder(true);
-  clearInterval(logsAutoRefreshTimer);
-  logsAutoRefreshTimer = setInterval(()=>{
-    if(logsDirHandle) refreshLogsFromFolder(false);
-  }, 60000);
-}
-
-async function tryRestoreLogsDirHandle(){
-  if(!fsApiSupported) return;
-  const handle = await idbGet('logsDir');
-  if(!handle) return;
-  try{
-    const perm = await handle.queryPermission({mode:'read'});
-    if(perm === 'granted'){
-      await connectLogsDirHandle(handle);
-    } else {
-      const dot = document.getElementById('logsConnDot');
-      const label = document.getElementById('logsConnLabel');
-      const btn = document.getElementById('btnPickLogsFolder');
-      label.textContent = 'Dossier « '+handle.name+' » lié précédemment — clique pour reconnecter';
-      btn.textContent = 'Reconnecter';
-      btn.onclick = async ()=>{
-        try{
-          const perm2 = await handle.requestPermission({mode:'read'});
-          if(perm2 === 'granted') await connectLogsDirHandle(handle);
-        }catch(e){ console.error(e); }
-      };
-    }
-  }catch(e){
-    console.warn('Handle du dossier Logs invalide', e);
-  }
-}
-
-/* scanne (non récursivement, à plat) le dossier Logs lié pour trouver les
-   fichiers AgOpenGPS_Events_Log*.txt, les analyse, et pousse les sessions
-   calculées dans l'état partagé (donc synchronisées via GitHub). */
-async function refreshLogsFromFolder(showToast){
-  if(!logsDirHandle) return;
-  let allEvents = [];
-  let filesRead = 0;
-  try{
-    for await (const [name, entry] of logsDirHandle.entries()){
-      if(entry.kind === 'file' && /agopengps_events_log.*\.txt$/i.test(name)){
-        try{
-          const file = await entry.getFile();
-          const text = await file.text();
-          allEvents = allEvents.concat(parseAgLogText(text));
-          filesRead++;
-        }catch(e){ console.error('Erreur lecture', name, e); }
-      }
-    }
-  }catch(e){
-    console.error('Erreur scan dossier Logs', e);
-    if(showToast) toast("Impossible de lire le dossier Logs.");
-    return;
-  }
-  if(!filesRead){
-    if(showToast) toast("Aucun fichier AgOpenGPS_Events_Log*.txt trouvé dans ce dossier.");
-    return;
-  }
-  const sessions = computeSessionsFromEvents(allEvents);
-  logSessions = sessions;
-  state.logSessions = sessions.map(s=>({fieldName:s.fieldName, start:s.start.toISOString(), end:s.end.toISOString(), durationMin:s.durationMin}));
-  renderLogSessions();
-  scheduleSave();
-  if(showToast) toast(sessions.length+" session(s) détectée(s) dans "+filesRead+" fichier(s)");
-}
-
 
 function parseAgLogDate(day, monthName, year, hour, minute){
   const m = AOG_MONTHS.indexOf(monthName);
@@ -2086,77 +1959,20 @@ function parseAgLogText(text){
   return events;
 }
 
-/* Expérimental : récupère les fichiers d'un dossier OneDrive partagé (lien
-   "lecture seule", sans connexion) via l'ancienne API api.onedrive.com qui
-   supporte l'accès anonyme aux liens de partage. Peut échouer (CORS, lien
-   mal configuré) — dans ce cas la synchro GitHub reste le filet de sécurité. */
-function encodeOneDriveShareUrl(url){
-  const b64 = btoa(unescape(encodeURIComponent(url))).replace(/=+$/,'').replace(/\//g,'_').replace(/\+/g,'-');
-  return 'u!' + b64;
-}
-
-async function fetchOneDriveShareLogs(){
-  const statusEl = document.getElementById('oneDriveShareStatus');
-  const url = document.getElementById('oneDriveShareUrl').value.trim();
-  if(!url){ toast("Colle d'abord un lien de partage OneDrive"); return; }
-  statusEl.textContent = "Connexion en cours…";
-  try{
-    const encoded = encodeOneDriveShareUrl(url);
-    const listRes = await fetch(`https://api.onedrive.com/v1.0/shares/${encoded}/root/children`, {cache:"no-store"});
-    if(!listRes.ok){
-      throw new Error("Impossible de lister le dossier (code "+listRes.status+"). Vérifie que le lien est bien en accès \"Lecture\" et \"Toute personne disposant du lien\".");
-    }
-    const listData = await listRes.json();
-    const items = (listData.value || []).filter(it => /agopengps_events_log.*\.txt$/i.test(it.name));
-    if(!items.length){
-      statusEl.textContent = "Connecté, mais aucun fichier AgOpenGPS_Events_Log*.txt trouvé dans ce dossier.";
-      return;
-    }
-    let allEvents = [];
-    let readCount = 0;
-    for(const item of items){
-      const downloadUrl = item['@content.downloadUrl'] || item['@microsoft.graph.downloadUrl'];
-      if(!downloadUrl) continue;
-      try{
-        const fileRes = await fetch(downloadUrl, {cache:"no-store"});
-        if(!fileRes.ok) continue;
-        const text = await fileRes.text();
-        allEvents = allEvents.concat(parseAgLogText(text));
-        readCount++;
-      }catch(e){ console.error('Erreur téléchargement', item.name, e); }
-    }
-    if(!readCount){
-      throw new Error("Le dossier a été listé mais aucun fichier n'a pu être téléchargé (probable blocage de sécurité du navigateur).");
-    }
-    const sessions = computeSessionsFromEvents(allEvents);
-    logSessions = sessions;
-    state.logSessions = sessions.map(s=>({fieldName:s.fieldName, start:s.start.toISOString(), end:s.end.toISOString(), durationMin:s.durationMin}));
-    renderLogSessions();
-    scheduleSave();
-    saveOneDriveShareUrl(url);
-    statusEl.textContent = "Réussi : "+sessions.length+" session(s) depuis "+readCount+" fichier(s), le "+new Date().toLocaleTimeString('fr-FR');
-    toast("Journaux récupérés depuis OneDrive");
-  }catch(e){
-    console.error(e);
-    statusEl.textContent = "Échec : "+(e.message||e);
+async function importLogFiles(fileList){
+  let allEvents = [];
+  for(const file of fileList){
+    try{
+      const text = await file.text();
+      allEvents = allEvents.concat(parseAgLogText(text));
+    }catch(e){ console.error('Erreur lecture log', file.name, e); }
   }
-}
-
-function saveOneDriveShareUrl(url){
-  try{ localStorage.setItem('carnet-de-champs-od-share', url); }catch(e){}
-}
-function tryRestoreOneDriveShareUrl(){
-  try{
-    const url = localStorage.getItem('carnet-de-champs-od-share');
-    if(url){
-      document.getElementById('oneDriveShareUrl').value = url;
-      fetchOneDriveShareLogs();
-    }
-  }catch(e){}
-}
-
-function computeSessionsFromEvents(allEvents){
+  if(!allEvents.length){
+    toast("Aucun événement Opened/Closed trouvé dans ces fichiers.");
+    return;
+  }
   allEvents.sort((a,b)=> a.date - b.date);
+
   const openTimes = {}; // fieldName (lowercase) -> Date d'ouverture en cours
   const sessions = [];
   allEvents.forEach(ev=>{
@@ -2179,27 +1995,10 @@ function computeSessionsFromEvents(allEvents){
       }
     }
   });
-  sessions.sort((a,b)=> b.start - a.start);
-  return sessions;
-}
 
-async function importLogFiles(fileList){
-  let allEvents = [];
-  for(const file of fileList){
-    try{
-      const text = await file.text();
-      allEvents = allEvents.concat(parseAgLogText(text));
-    }catch(e){ console.error('Erreur lecture log', file.name, e); }
-  }
-  if(!allEvents.length){
-    toast("Aucun événement Opened/Closed trouvé dans ces fichiers.");
-    return;
-  }
-  const sessions = computeSessionsFromEvents(allEvents);
+  sessions.sort((a,b)=> b.start - a.start);
   logSessions = sessions;
-  state.logSessions = sessions.map(s=>({fieldName:s.fieldName, start:s.start.toISOString(), end:s.end.toISOString(), durationMin:s.durationMin}));
   renderLogSessions();
-  scheduleSave();
   toast(sessions.length+" session(s) détectée(s) dans "+fileList.length+" fichier(s)");
 }
 
@@ -2352,8 +2151,6 @@ document.getElementById('fDate').valueAsDate = new Date();
 (async function initConnections(){
   await tryRestoreGithub();
   await tryRestoreDirHandle();
-  await tryRestoreLogsDirHandle();
-  tryRestoreOneDriveShareUrl();
 })();
 
 if('serviceWorker' in navigator){
