@@ -14,6 +14,8 @@
 <link rel="icon" href="icon-192.png" type="image/png">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -255,7 +257,7 @@
         <span id="odLabel">GitHub non connecté</span>
         <button class="btn ghost small" id="btnGoToGithub">Connexion GitHub</button>
       </div>
-      <span style="font-size:10px;color:#8a9280;">v2026-09-04-4</span>
+      <span style="font-size:10px;color:#8a9280;">v2026-09-04-6</span>
     </div>
   </header>
 
@@ -269,6 +271,7 @@
       <button class="tab-btn active" data-view="champs">Champs <span class="count" id="countFields"></span></button>
       <button class="tab-btn" data-view="interventions">Interventions <span class="count" id="countInterv"></span></button>
       <button class="tab-btn" data-view="types">Types d'intervention</button>
+      <button class="tab-btn" data-view="temps">Temps passé</button>
       <button class="tab-btn" data-view="donnees">Données &amp; export</button>
     </nav>
 
@@ -306,7 +309,7 @@
         </div>
 
         <div class="panel">
-          <div class="panel-title">Nouvelle intervention</div>
+          <div class="panel-title" id="interventionFormTitle">Nouvelle intervention</div>
           <div class="panel-body">
             <form id="interventionForm" class="interv-form">
               <div>
@@ -333,16 +336,34 @@
                 <label class="field-label">Prix (€)</label>
                 <input type="number" step="0.01" id="fPrix" placeholder="0,00">
               </div>
+              <div>
+                <label class="field-label">Durée (min)</label>
+                <input type="number" step="1" id="fDuree" placeholder="auto/manuel">
+              </div>
+              <div id="fDetail1Wrap" style="display:none;">
+                <label class="field-label" id="fDetail1Label">Détail 1</label>
+                <input type="text" id="fDetail1">
+              </div>
+              <div id="fDetail2Wrap" style="display:none;">
+                <label class="field-label" id="fDetail2Label">Détail 2</label>
+                <input type="text" id="fDetail2">
+              </div>
               <div class="full" style="grid-column:span 3;">
-                <label class="field-label">Détails (produit, dose, variété, façon culturale…)</label>
+                <label class="field-label">Détails complémentaires</label>
                 <input type="text" id="fDetails">
               </div>
               <div class="full">
                 <label class="field-label">Remarques</label>
                 <textarea id="fNotes"></textarea>
               </div>
-              <div class="full" style="display:flex;justify-content:flex-end;">
-                <button type="submit" class="btn primary">Enregistrer l'intervention</button>
+              <div class="full" style="display:flex;align-items:center;gap:16px;">
+                <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+                  <input type="checkbox" id="fInvoiced"> Déjà facturé
+                </label>
+              </div>
+              <div class="full" style="display:flex;justify-content:flex-end;gap:10px;">
+                <button type="button" class="btn" id="btnCancelEdit" style="display:none;">Annuler la modification</button>
+                <button type="submit" class="btn primary" id="btnSubmitInterv">Enregistrer l'intervention</button>
               </div>
             </form>
           </div>
@@ -368,22 +389,48 @@
                 <label class="field-label">Jusqu'au</label>
                 <input type="date" id="filterTo">
               </div>
+              <div>
+                <label class="field-label">Facturation</label>
+                <select id="filterInvoiced">
+                  <option value="">Toutes</option>
+                  <option value="no">Non facturées</option>
+                  <option value="yes">Facturées</option>
+                </select>
+              </div>
             </div>
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
               <div style="font-size:13px;color:var(--muted);">
                 <span id="selectionCount">0 sélectionnée(s)</span> · Total affiché : <strong id="totalPrix">0,00 €</strong>
               </div>
-              <button class="btn small" id="btnExportSelection" disabled>Exporter la sélection (.csv)</button>
+              <div style="display:flex;gap:8px;">
+                <button class="btn small" id="btnExportPdf" disabled>Facture PDF (sélection)</button>
+                <button class="btn small" id="btnExportSelection" disabled>Exporter la sélection (.csv)</button>
+              </div>
             </div>
             <div style="overflow-x:auto;">
               <table class="ledger">
                 <thead>
                   <tr>
                     <th style="width:26px;"><input type="checkbox" id="selectAllRows"></th>
-                    <th>Date</th><th>Client</th><th>Champ</th><th>Type</th><th>Surf. (ha)</th><th>Prix</th><th>Détails</th><th></th>
+                    <th>Date</th><th>Client</th><th>Champ</th><th>Type</th><th>Surf. (ha)</th><th>Prix</th><th>Détails</th><th>Facturé</th><th></th>
                   </tr>
                 </thead>
                 <tbody id="interventionsBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Récapitulatif par client</div>
+          <div class="panel-body">
+            <p class="sub" style="margin-top:0;">Calculé sur les interventions actuellement affichées ci-dessus (mêmes filtres).</p>
+            <div style="overflow-x:auto;">
+              <table class="ledger">
+                <thead>
+                  <tr><th>Client</th><th>Interventions</th><th>Surface (ha)</th><th>Facturé</th><th>Non facturé</th><th>Total</th></tr>
+                </thead>
+                <tbody id="clientSummaryBody"></tbody>
               </table>
             </div>
           </div>
@@ -404,17 +451,88 @@
           <div class="add-type-row">
             <input type="text" id="newTypeInput" placeholder="Nouveau type (ex. Broyage, Roulage…)">
             <input type="number" step="0.01" id="newTypePrice" placeholder="Prix (€)" style="max-width:110px;">
+            <input type="text" id="newTypeField1" placeholder="Libellé champ 1 (optionnel)" style="max-width:170px;">
+            <input type="text" id="newTypeField2" placeholder="Libellé champ 2 (optionnel)" style="max-width:170px;">
             <button class="btn primary small" id="btnAddType">Ajouter</button>
           </div>
         </div>
       </section>
 
-      <!-- ===== DONNEES ===== -->
-      <section class="view" id="view-donnees">
+      <!-- ===== TEMPS PASSÉ ===== -->
+      <section class="view" id="view-temps">
+        <div class="view-head">
+          <div>
+            <h2>Temps passé</h2>
+            <p class="sub">Calculé depuis les journaux d'événements AgOpenGPS (fichiers AgOpenGPS_Events_Log*.txt)</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-body">
+            <p class="sub" style="margin-top:0;">
+              Ces fichiers se trouvent dans le dossier <code>Logs</code> d'AgOpenGPS (à côté du dossier <code>Fields</code>).
+              Ils contiennent une ligne à chaque ouverture/fermeture de champ, avec la date et l'heure — ça permet de
+              calculer combien de temps a été passé sur chaque champ, à chaque session.
+            </p>
+            <div style="display:flex;gap:12px;align-items:end;flex-wrap:wrap;">
+              <div>
+                <button class="btn" id="btnImportLogs">Importer des journaux (.txt)</button>
+                <input type="file" id="fileLogsInput" accept=".txt" multiple style="display:none;">
+              </div>
+              <div>
+                <label class="field-label">Durée minimum affichée</label>
+                <select id="minSessionDuration">
+                  <option value="0">Toutes</option>
+                  <option value="1">1 min +</option>
+                  <option value="5" selected>5 min +</option>
+                  <option value="15">15 min +</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Sessions détectées</div>
+          <div class="panel-body">
+            <div id="logsEmptyNote" class="empty-note">Importe des journaux pour voir les sessions détectées.</div>
+            <div style="overflow-x:auto;">
+              <table class="ledger" id="logsSessionsTable" style="display:none;">
+                <thead>
+                  <tr><th>Date</th><th>Champ</th><th>Début</th><th>Fin</th><th>Durée</th><th></th></tr>
+                </thead>
+                <tbody id="logsSessionsBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+
         <div class="view-head">
           <div>
             <h2>Données &amp; export</h2>
             <p class="sub">Sauvegarde locale et export pour la facturation</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Mes coordonnées (en-tête des factures PDF)</div>
+          <div class="panel-body">
+            <div class="interv-form" style="grid-template-columns:1fr 1fr;">
+              <div>
+                <label class="field-label">Nom / raison sociale</label>
+                <input type="text" id="companyName" placeholder="EARL La Grand'Fat">
+              </div>
+              <div>
+                <label class="field-label">SIRET</label>
+                <input type="text" id="companySiret" placeholder="123 456 789 00012">
+              </div>
+              <div class="full">
+                <label class="field-label">Adresse</label>
+                <input type="text" id="companyAddress" placeholder="Le Vigeant, 86150">
+              </div>
+            </div>
           </div>
         </div>
 
@@ -506,22 +624,30 @@
 /* ============================================================
    ÉTAT DE L'APPLICATION
    ============================================================ */
-const DEFAULT_TYPES = ["Semis","Pulvérisation","Travail du sol","Récolte","Épandage","Autre"]
-  .map(name => ({name, price: null}));
+const DEFAULT_TYPES = [
+  {name:"Semis", field1Label:"Variété", field2Label:"Densité"},
+  {name:"Pulvérisation", field1Label:"Produit", field2Label:"Dose"},
+  {name:"Travail du sol", field1Label:"Façon culturale", field2Label:null},
+  {name:"Récolte", field1Label:null, field2Label:null},
+  {name:"Épandage", field1Label:"Produit", field2Label:"Dose"},
+  {name:"Autre", field1Label:null, field2Label:null},
+].map(t => ({...t, price: null}));
 
 let state = {
   fields: {},          // id -> {id,name,client,boundary:[[lat,lon],...],areaHa,source}
-  interventions: [],   // {id,fieldId,type,date,client,areaHa,price,details,notes}
-  types: [...DEFAULT_TYPES],   // {name, price}
+  interventions: [],   // {id,fieldId,type,date,client,areaHa,price,detail1,detail2,details,notes,invoiced}
+  types: [...DEFAULT_TYPES],   // {name, price, field1Label, field2Label}
+  companyInfo: {name:'', address:'', siret:''},
 };
 
 /* remet en forme un état chargé (fichier JSON ou dossier) : gère les anciennes
    données où "types" était un simple tableau de chaînes */
 function normalizeState(loaded){
-  const merged = Object.assign({fields:{},interventions:[],types:[...DEFAULT_TYPES]}, loaded);
+  const merged = Object.assign({fields:{},interventions:[],types:[...DEFAULT_TYPES],companyInfo:{name:'',address:'',siret:''}}, loaded);
   if(Array.isArray(merged.types)){
     merged.types = merged.types.map(t => typeof t === 'string' ? {name:t, price:null} : t);
   }
+  if(!merged.companyInfo) merged.companyInfo = {name:'',address:'',siret:''};
   return merged;
 }
 
@@ -1272,6 +1398,7 @@ function escapeHtml(s){
 }
 
 function goToInterventionForm(fieldId){
+  resetInterventionForm();
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.querySelector('.tab-btn[data-view="interventions"]').classList.add('active');
@@ -1295,10 +1422,14 @@ function renderTypes(){
     return;
   }
   list.innerHTML = state.types.map(t=>{
-    return `<div class="type-row">
+    return `<div class="type-row" style="flex-wrap:wrap;">
       <span class="tname">${escapeHtml(t.name)}</span>
       <input type="number" step="0.01" class="price-input" data-price-for="${escapeHtml(t.name)}"
         value="${t.price!=null ? t.price : ''}" placeholder="Prix (€)">
+      <input type="text" class="price-input" data-field1-for="${escapeHtml(t.name)}"
+        value="${escapeHtml(t.field1Label||'')}" placeholder="Libellé champ 1 (ex. Produit)" style="width:170px;">
+      <input type="text" class="price-input" data-field2-for="${escapeHtml(t.name)}"
+        value="${escapeHtml(t.field2Label||'')}" placeholder="Libellé champ 2 (ex. Dose)" style="width:170px;">
       <button class="btn small danger" data-del-type="${escapeHtml(t.name)}">Supprimer</button>
     </div>`;
   }).join('');
@@ -1310,6 +1441,18 @@ function renderTypes(){
         t.price = frenchNumber(inp.value);
         scheduleSave();
       }
+    });
+  });
+  list.querySelectorAll('[data-field1-for]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      const t = getType(inp.dataset.field1For);
+      if(t){ t.field1Label = inp.value.trim() || null; refreshTypeSelect(); scheduleSave(); }
+    });
+  });
+  list.querySelectorAll('[data-field2-for]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      const t = getType(inp.dataset.field2For);
+      if(t){ t.field2Label = inp.value.trim() || null; refreshTypeSelect(); scheduleSave(); }
     });
   });
   list.querySelectorAll('[data-del-type]').forEach(btn=>{
@@ -1357,6 +1500,20 @@ document.getElementById('fChamp').addEventListener('change', e=>{
   }
 });
 
+function updateDynamicDetailFields(){
+  const t = getType(document.getElementById('fType').value);
+  const w1 = document.getElementById('fDetail1Wrap');
+  const w2 = document.getElementById('fDetail2Wrap');
+  if(t && t.field1Label){
+    w1.style.display = '';
+    document.getElementById('fDetail1Label').textContent = t.field1Label;
+  } else { w1.style.display = 'none'; document.getElementById('fDetail1').value=''; }
+  if(t && t.field2Label){
+    w2.style.display = '';
+    document.getElementById('fDetail2Label').textContent = t.field2Label;
+  } else { w2.style.display = 'none'; document.getElementById('fDetail2').value=''; }
+}
+
 document.getElementById('fType').addEventListener('change', e=>{
   const t = getType(e.target.value);
   const prixField = document.getElementById('fPrix');
@@ -1364,10 +1521,51 @@ document.getElementById('fType').addEventListener('change', e=>{
   if(t && t.price != null && !prixField.dataset.userEdited){
     prixField.value = t.price;
   }
+  updateDynamicDetailFields();
 });
 document.getElementById('fPrix').addEventListener('input', e=>{
   e.target.dataset.userEdited = '1';
 });
+
+let editingInterventionId = null;
+
+function resetInterventionForm(){
+  editingInterventionId = null;
+  document.getElementById('interventionForm').reset();
+  document.getElementById('fDate').value = '';
+  delete document.getElementById('fPrix').dataset.userEdited;
+  document.getElementById('interventionFormTitle').textContent = 'Nouvelle intervention';
+  document.getElementById('btnSubmitInterv').textContent = "Enregistrer l'intervention";
+  document.getElementById('btnCancelEdit').style.display = 'none';
+  updateDynamicDetailFields();
+}
+
+function startEditIntervention(id){
+  const interv = state.interventions.find(i=>i.id===id);
+  if(!interv) return;
+  editingInterventionId = id;
+  document.querySelector('.tab-btn[data-view="interventions"]').click();
+  document.getElementById('fChamp').value = interv.fieldId;
+  document.getElementById('fType').value = interv.type;
+  document.getElementById('fDate').value = interv.date || '';
+  document.getElementById('fSurface').value = interv.areaHa != null ? interv.areaHa : '';
+  document.getElementById('fClient').value = interv.client || '';
+  document.getElementById('fPrix').value = interv.price != null ? interv.price : '';
+  document.getElementById('fPrix').dataset.userEdited = '1';
+  document.getElementById('fDuree').value = interv.durationMin != null ? interv.durationMin : '';
+  document.getElementById('fDetails').value = interv.details || '';
+  document.getElementById('fNotes').value = interv.notes || '';
+  document.getElementById('fInvoiced').checked = !!interv.invoiced;
+  updateDynamicDetailFields();
+  document.getElementById('fDetail1').value = interv.detail1 || '';
+  document.getElementById('fDetail2').value = interv.detail2 || '';
+  document.getElementById('interventionFormTitle').textContent = "Modifier l'intervention";
+  document.getElementById('btnSubmitInterv').textContent = 'Mettre à jour';
+  document.getElementById('btnCancelEdit').style.display = '';
+  document.getElementById('interventionForm').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+document.getElementById('btnCancelEdit').addEventListener('click', resetInterventionForm);
 
 document.getElementById('interventionForm').addEventListener('submit', e=>{
   e.preventDefault();
@@ -1377,25 +1575,34 @@ document.getElementById('interventionForm').addEventListener('submit', e=>{
   const surface = frenchNumber(document.getElementById('fSurface').value) || f.areaHa || null;
   const client = document.getElementById('fClient').value.trim() || f.client || '';
 
-  state.interventions.push({
-    id: uid(),
+  const data = {
     fieldId,
     type: document.getElementById('fType').value,
     date: document.getElementById('fDate').value,
     client,
     areaHa: surface,
     price: frenchNumber(document.getElementById('fPrix').value),
+    durationMin: document.getElementById('fDuree').value ? Math.round(frenchNumber(document.getElementById('fDuree').value)) : null,
+    detail1: document.getElementById('fDetail1').value.trim(),
+    detail2: document.getElementById('fDetail2').value.trim(),
     details: document.getElementById('fDetails').value.trim(),
     notes: document.getElementById('fNotes').value.trim(),
-  });
+    invoiced: document.getElementById('fInvoiced').checked,
+  };
 
-  e.target.reset();
-  document.getElementById('fDate').value = '';
-  delete document.getElementById('fPrix').dataset.userEdited;
+  if(editingInterventionId){
+    const idx = state.interventions.findIndex(i=>i.id===editingInterventionId);
+    if(idx !== -1) state.interventions[idx] = {...state.interventions[idx], ...data};
+    toast("Intervention mise à jour");
+  } else {
+    state.interventions.push({id: uid(), ...data});
+    toast("Intervention enregistrée");
+  }
+
+  resetInterventionForm();
   renderInterventions();
   refreshFilterSelects();
   scheduleSave();
-  toast("Intervention enregistrée");
 });
 
 function currentFilters(){
@@ -1404,16 +1611,18 @@ function currentFilters(){
     fieldId: document.getElementById('filterField').value,
     from: document.getElementById('filterFrom').value,
     to: document.getElementById('filterTo').value,
+    invoiced: document.getElementById('filterInvoiced').value,
   };
 }
 
 function filteredInterventions(){
-  const {client, fieldId, from, to} = currentFilters();
+  const {client, fieldId, from, to, invoiced} = currentFilters();
   return state.interventions
     .filter(i => !client || i.client === client)
     .filter(i => !fieldId || i.fieldId === fieldId)
     .filter(i => !from || i.date >= from)
     .filter(i => !to || i.date <= to)
+    .filter(i => !invoiced || (invoiced === 'yes' ? !!i.invoiced : !i.invoiced))
     .sort((a,b) => (b.date||'').localeCompare(a.date||''));
 }
 
@@ -1429,12 +1638,18 @@ function renderInterventions(){
   Array.from(selectedInterventions).forEach(id=>{ if(!visibleIds.has(id)) selectedInterventions.delete(id); });
 
   if(!rows.length){
-    body.innerHTML = `<tr><td colspan="9" class="empty-note">Aucune intervention pour ces filtres.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="10" class="empty-note">Aucune intervention pour ces filtres.</td></tr>`;
   } else {
     body.innerHTML = rows.map(i=>{
       const f = state.fields[i.fieldId];
       const checked = selectedInterventions.has(i.id) ? 'checked' : '';
-      return `<tr>
+      const detailBits = [];
+      if(i.durationMin) detailBits.push(i.durationMin+' min');
+      if(i.detail1) detailBits.push(escapeHtml(i.detail1));
+      if(i.detail2) detailBits.push(escapeHtml(i.detail2));
+      if(i.details) detailBits.push(escapeHtml(i.details));
+      const detailText = detailBits.length ? detailBits.join(' · ') : '—';
+      return `<tr style="${i.invoiced?'opacity:.65;':''}">
         <td><input type="checkbox" class="row-select" data-id="${i.id}" ${checked}></td>
         <td>${i.date ? formatDateFr(i.date) : '—'}</td>
         <td>${escapeHtml(i.client||'—')}</td>
@@ -1442,8 +1657,10 @@ function renderInterventions(){
         <td><span class="type-pill">${escapeHtml(i.type)}</span></td>
         <td>${i.areaHa ? i.areaHa.toFixed(2).replace('.',',') : '—'}</td>
         <td>${formatPrice(i.price)}</td>
-        <td>${escapeHtml(i.details||'—')}</td>
+        <td>${detailText}</td>
+        <td style="text-align:center;"><input type="checkbox" class="row-invoiced" data-id="${i.id}" ${i.invoiced?'checked':''} title="Marquer comme facturé"></td>
         <td class="row-actions">
+          <button class="btn small" data-edit="${i.id}">Modifier</button>
           <button class="btn small" data-export="${i.id}" title="Exporter uniquement cette intervention">Export</button>
           <button class="btn small danger" data-del="${i.id}">Suppr.</button>
         </td>
@@ -1460,10 +1677,19 @@ function renderInterventions(){
       scheduleSave();
     });
   });
+  body.querySelectorAll('[data-edit]').forEach(btn=>{
+    btn.addEventListener('click', ()=>startEditIntervention(btn.dataset.edit));
+  });
   body.querySelectorAll('[data-export]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const interv = state.interventions.find(i=>i.id===btn.dataset.export);
       if(interv) exportCsv([interv], 'intervention-'+(interv.date||'')+'.csv');
+    });
+  });
+  body.querySelectorAll('.row-invoiced').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      const interv = state.interventions.find(i=>i.id===cb.dataset.id);
+      if(interv){ interv.invoiced = cb.checked; scheduleSave(); renderInterventions(); }
     });
   });
   body.querySelectorAll('.row-select').forEach(cb=>{
@@ -1474,13 +1700,47 @@ function renderInterventions(){
     });
   });
 
+  renderClientSummary(rows);
   updateSelectionUI(rows);
+}
+
+function renderClientSummary(rows){
+  const body = document.getElementById('clientSummaryBody');
+  if(!body) return;
+  const byClient = {};
+  rows.forEach(i=>{
+    const key = i.client || '(sans client)';
+    if(!byClient[key]) byClient[key] = {count:0, area:0, invoiced:0, notInvoiced:0};
+    const g = byClient[key];
+    g.count++;
+    if(i.areaHa) g.area += i.areaHa;
+    const price = typeof i.price === 'number' ? i.price : 0;
+    if(i.invoiced) g.invoiced += price; else g.notInvoiced += price;
+  });
+  const clients = Object.keys(byClient).sort((a,b)=>a.localeCompare(b,'fr'));
+  if(!clients.length){
+    body.innerHTML = `<tr><td colspan="6" class="empty-note">Aucune donnée pour ces filtres.</td></tr>`;
+    return;
+  }
+  body.innerHTML = clients.map(c=>{
+    const g = byClient[c];
+    const total = g.invoiced + g.notInvoiced;
+    return `<tr>
+      <td>${escapeHtml(c)}</td>
+      <td>${g.count}</td>
+      <td>${g.area.toFixed(2).replace('.',',')}</td>
+      <td>${formatPrice(g.invoiced, true)}</td>
+      <td>${formatPrice(g.notInvoiced, true)}</td>
+      <td><strong>${formatPrice(total, true)}</strong></td>
+    </tr>`;
+  }).join('');
 }
 
 function updateSelectionUI(rows){
   const count = selectedInterventions.size;
   document.getElementById('selectionCount').textContent = count+' sélectionnée(s)';
   document.getElementById('btnExportSelection').disabled = count === 0;
+  document.getElementById('btnExportPdf').disabled = count === 0;
   const total = rows.reduce((sum,i)=> sum + (typeof i.price==='number' ? i.price : 0), 0);
   document.getElementById('totalPrix').textContent = formatPrice(total, true);
   const selectAll = document.getElementById('selectAllRows');
@@ -1506,7 +1766,7 @@ function formatDateFr(iso){
   return `${d}/${m}/${y}`;
 }
 
-['filterClient','filterField','filterFrom','filterTo'].forEach(id=>{
+['filterClient','filterField','filterFrom','filterTo','filterInvoiced'].forEach(id=>{
   document.getElementById(id).addEventListener('change', renderInterventions);
 });
 
@@ -1516,7 +1776,7 @@ function formatDateFr(iso){
 function exportCsv(rows, filename){
   rows = rows || filteredInterventions();
   if(!rows.length){ toast("Aucune intervention à exporter"); return; }
-  const header = ['Date','Client','Champ','Type','Surface (ha)','Prix (€)','Détails','Remarques'];
+  const header = ['Date','Client','Champ','Type','Surface (ha)','Prix (€)','Durée (min)','Détail 1','Détail 2','Détails','Remarques','Facturé'];
   const lines = [header.join(';')];
   let total = 0;
   rows.forEach(i=>{
@@ -1529,12 +1789,16 @@ function exportCsv(rows, filename){
       i.type,
       i.areaHa ? String(i.areaHa).replace('.',',') : '',
       typeof i.price === 'number' ? String(i.price).replace('.',',') : '',
+      i.durationMin || '',
+      (i.detail1||'').replace(/;/g,','),
+      (i.detail2||'').replace(/;/g,','),
       (i.details||'').replace(/;/g,','),
       (i.notes||'').replace(/;/g,','),
+      i.invoiced ? 'Oui' : 'Non',
     ];
     lines.push(line.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(';'));
   });
-  lines.push(['','','','','Total',String(total.toFixed(2)).replace('.',','),'',''].map(v=>`"${v}"`).join(';'));
+  lines.push(['','','','','Total',String(total.toFixed(2)).replace('.',','),'','','','','',''].map(v=>`"${v}"`).join(';'));
   const blob = new Blob(["\uFEFF"+lines.join('\r\n')], {type:'text/csv;charset=utf-8;'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -1565,6 +1829,14 @@ function renderAll(){
   refreshFilterSelects();
   renderTypes();
   renderInterventions();
+  renderCompanyInfo();
+}
+
+function renderCompanyInfo(){
+  const ci = state.companyInfo || {};
+  document.getElementById('companyName').value = ci.name || '';
+  document.getElementById('companyAddress').value = ci.address || '';
+  document.getElementById('companySiret').value = ci.siret || '';
 }
 
 /* ============================================================
@@ -1594,15 +1866,28 @@ document.getElementById('fileKmlInput').addEventListener('change', e=>{
   e.target.value = '';
 });
 
+document.getElementById('btnImportLogs').addEventListener('click', ()=>{
+  document.getElementById('fileLogsInput').click();
+});
+document.getElementById('fileLogsInput').addEventListener('change', e=>{
+  if(e.target.files.length) importLogFiles(Array.from(e.target.files));
+  e.target.value = '';
+});
+document.getElementById('minSessionDuration').addEventListener('change', renderLogSessions);
+
 document.getElementById('btnAddType').addEventListener('click', ()=>{
   const inp = document.getElementById('newTypeInput');
   const priceInp = document.getElementById('newTypePrice');
+  const f1Inp = document.getElementById('newTypeField1');
+  const f2Inp = document.getElementById('newTypeField2');
   const val = inp.value.trim();
   if(!val) return;
   if(state.types.some(t=>t.name.toLowerCase()===val.toLowerCase())){ toast("Ce type existe déjà"); return; }
-  state.types.push({name: val, price: frenchNumber(priceInp.value)});
-  inp.value = '';
-  priceInp.value = '';
+  state.types.push({
+    name: val, price: frenchNumber(priceInp.value),
+    field1Label: f1Inp.value.trim() || null, field2Label: f2Inp.value.trim() || null,
+  });
+  inp.value = ''; priceInp.value = ''; f1Inp.value = ''; f2Inp.value = '';
   renderTypes();
   refreshTypeSelect();
   scheduleSave();
@@ -1622,6 +1907,234 @@ document.getElementById('btnExportSelection').addEventListener('click', ()=>{
   const rows = state.interventions.filter(i=>selectedInterventions.has(i.id));
   exportCsv(rows, 'interventions-selection.csv');
 });
+document.getElementById('btnExportPdf').addEventListener('click', ()=>{
+  const rows = state.interventions.filter(i=>selectedInterventions.has(i.id));
+  generateInvoicePdf(rows);
+});
+
+['companyName','companyAddress','companySiret'].forEach(id=>{
+  document.getElementById(id).addEventListener('change', ()=>{
+    state.companyInfo = {
+      name: document.getElementById('companyName').value.trim(),
+      address: document.getElementById('companyAddress').value.trim(),
+      siret: document.getElementById('companySiret').value.trim(),
+    };
+    scheduleSave();
+  });
+});
+
+/* ============================================================
+   TEMPS PASSÉ — analyse des journaux d'événements AgOpenGPS
+   ============================================================ */
+const AOG_MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const AOG_WEEKDAYS = "Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday";
+// ex: "** Opened **  Svo route 2020.Mar.23 16_33   Tuesday, 12 August 2025 17:52"
+const AOG_LOG_LINE_RE = new RegExp(
+  "\\*\\*\\s*(Field closed|Closed|Opened)\\s*\\*\\*\\s+(.+?)\\s{2,}(?:"+AOG_WEEKDAYS+"),\\s*(\\d{1,2})\\s+(\\w+)\\s+(\\d{4})\\s+(\\d{1,2}):(\\d{2})"
+);
+
+let logSessions = []; // {fieldName, start:Date, end:Date, durationMin}
+
+function parseAgLogDate(day, monthName, year, hour, minute){
+  const m = AOG_MONTHS.indexOf(monthName);
+  if(m === -1) return null;
+  return new Date(Number(year), m, Number(day), Number(hour), Number(minute));
+}
+
+function parseAgLogText(text){
+  const events = [];
+  const lines = text.split(/\r\n|\r|\n/);
+  lines.forEach(line=>{
+    const m = line.match(AOG_LOG_LINE_RE);
+    if(!m) return;
+    const [, kind, fieldName, day, monthName, year, hour, minute] = m;
+    const dt = parseAgLogDate(day, monthName, year, hour, minute);
+    if(!dt) return;
+    events.push({
+      type: /opened/i.test(kind) ? 'open' : 'close',
+      fieldName: fieldName.trim(),
+      date: dt,
+    });
+  });
+  return events;
+}
+
+async function importLogFiles(fileList){
+  let allEvents = [];
+  for(const file of fileList){
+    try{
+      const text = await file.text();
+      allEvents = allEvents.concat(parseAgLogText(text));
+    }catch(e){ console.error('Erreur lecture log', file.name, e); }
+  }
+  if(!allEvents.length){
+    toast("Aucun événement Opened/Closed trouvé dans ces fichiers.");
+    return;
+  }
+  allEvents.sort((a,b)=> a.date - b.date);
+
+  const openTimes = {}; // fieldName (lowercase) -> Date d'ouverture en cours
+  const sessions = [];
+  allEvents.forEach(ev=>{
+    const key = ev.fieldName.toLowerCase();
+    if(ev.type === 'open'){
+      openTimes[key] = {name: ev.fieldName, date: ev.date};
+    } else {
+      const open = openTimes[key];
+      if(open){
+        const durationMin = Math.round((ev.date - open.date) / 60000);
+        if(durationMin > 0){
+          sessions.push({
+            fieldName: open.name,
+            start: open.date,
+            end: ev.date,
+            durationMin,
+          });
+        }
+        delete openTimes[key];
+      }
+    }
+  });
+
+  sessions.sort((a,b)=> b.start - a.start);
+  logSessions = sessions;
+  renderLogSessions();
+  toast(sessions.length+" session(s) détectée(s) dans "+fileList.length+" fichier(s)");
+}
+
+function renderLogSessions(){
+  const minDur = Number(document.getElementById('minSessionDuration').value);
+  const rows = logSessions.filter(s=>s.durationMin >= minDur);
+  const table = document.getElementById('logsSessionsTable');
+  const emptyNote = document.getElementById('logsEmptyNote');
+  const body = document.getElementById('logsSessionsBody');
+
+  if(!logSessions.length){
+    table.style.display = 'none';
+    emptyNote.style.display = '';
+    emptyNote.textContent = "Importe des journaux pour voir les sessions détectées.";
+    return;
+  }
+  if(!rows.length){
+    table.style.display = 'none';
+    emptyNote.style.display = '';
+    emptyNote.textContent = "Aucune session ne dépasse la durée minimum choisie.";
+    return;
+  }
+  table.style.display = '';
+  emptyNote.style.display = 'none';
+
+  const fmtTime = d => d.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+  const fmtDate = d => d.toLocaleDateString('fr-FR');
+  const fmtDur = min => min >= 60 ? (Math.floor(min/60)+'h'+String(min%60).padStart(2,'0')) : min+' min';
+
+  body.innerHTML = rows.map((s,idx)=>{
+    return `<tr>
+      <td>${fmtDate(s.start)}</td>
+      <td>${escapeHtml(s.fieldName)}</td>
+      <td>${fmtTime(s.start)}</td>
+      <td>${fmtTime(s.end)}</td>
+      <td>${fmtDur(s.durationMin)}</td>
+      <td><button class="btn small" data-session-idx="${idx}">+ Intervention</button></td>
+    </tr>`;
+  }).join('');
+
+  body.querySelectorAll('[data-session-idx]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const s = rows[Number(btn.dataset.sessionIdx)];
+      prefillInterventionFromSession(s);
+    });
+  });
+}
+
+function prefillInterventionFromSession(session){
+  resetInterventionForm();
+  document.querySelector('.tab-btn[data-view="interventions"]').click();
+
+  const key = session.fieldName.trim().toLowerCase();
+  const match = Object.values(state.fields).find(f=>f.name.trim().toLowerCase() === key);
+  if(match){
+    document.getElementById('fChamp').value = match.id;
+    document.getElementById('fChamp').dispatchEvent(new Event('change'));
+  } else {
+    toast("Champ « "+session.fieldName+" » non trouvé dans l'appli — sélectionne-le manuellement.");
+  }
+  const iso = session.start.toISOString().slice(0,10);
+  document.getElementById('fDate').value = iso;
+  document.getElementById('fDuree').value = session.durationMin;
+  document.getElementById('interventionForm').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function generateInvoicePdf(rows){
+
+
+  if(!rows.length){ toast("Sélectionne au moins une intervention à facturer"); return; }
+  if(typeof window.jspdf === 'undefined'){ toast("Le générateur de PDF n'a pas pu se charger (vérifie la connexion réseau)."); return; }
+  const { jsPDF } = window.jspdf;
+  const ci = state.companyInfo || {};
+
+  // regroupe par client : une section par client, sur une nouvelle page si plusieurs
+  const byClient = {};
+  rows.forEach(i=>{
+    const key = i.client || '(sans client)';
+    if(!byClient[key]) byClient[key] = [];
+    byClient[key].push(i);
+  });
+  const clients = Object.keys(byClient).sort((a,b)=>a.localeCompare(b,'fr'));
+
+  const doc = new jsPDF();
+  clients.forEach((client, idx)=>{
+    if(idx > 0) doc.addPage();
+    const clientRows = byClient[client].slice().sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+
+    doc.setFontSize(16);
+    doc.text(ci.name || 'Facture', 14, 18);
+    doc.setFontSize(9);
+    doc.setTextColor(100);
+    let y = 24;
+    if(ci.address){ doc.text(ci.address, 14, y); y += 5; }
+    if(ci.siret){ doc.text('SIRET : '+ci.siret, 14, y); y += 5; }
+
+    doc.setTextColor(20);
+    doc.setFontSize(12);
+    doc.text('Facture — '+client, 14, y+6);
+    doc.setFontSize(9);
+    doc.setTextColor(100);
+    doc.text('Date d\'émission : '+new Date().toLocaleDateString('fr-FR'), 14, y+11);
+
+    const body = clientRows.map(i=>{
+      const f = state.fields[i.fieldId];
+      const detailBits = [];
+      if(i.detail1) detailBits.push(i.detail1);
+      if(i.detail2) detailBits.push(i.detail2);
+      if(i.details) detailBits.push(i.details);
+      return [
+        i.date ? formatDateFr(i.date) : '—',
+        f ? f.name : '—',
+        i.type,
+        i.areaHa ? i.areaHa.toFixed(2).replace('.',',')+' ha' : '—',
+        detailBits.join(' · ') || '—',
+        formatPrice(i.price, true),
+      ];
+    });
+    const total = clientRows.reduce((s,i)=> s + (typeof i.price==='number'?i.price:0), 0);
+
+    doc.autoTable({
+      startY: y + 16,
+      head: [['Date','Champ','Type','Surface','Détails','Prix']],
+      body,
+      styles: {fontSize:8, cellPadding:2},
+      headStyles: {fillColor:[51,80,58]},
+      foot: [['','','','','Total', formatPrice(total, true)]],
+      footStyles: {fillColor:[244,243,236], textColor:20, fontStyle:'bold'},
+    });
+  });
+
+  const filename = clients.length === 1
+    ? 'facture-'+clients[0].replace(/[^a-z0-9]+/gi,'-')+'.pdf'
+    : 'factures-'+new Date().toISOString().slice(0,10)+'.pdf';
+  doc.save(filename);
+}
 
 /* ============================================================
    INITIALISATION
