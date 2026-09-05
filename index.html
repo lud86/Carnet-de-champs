@@ -257,7 +257,7 @@
         <span id="odLabel">GitHub non connecté</span>
         <button class="btn ghost small" id="btnGoToGithub">Connexion GitHub</button>
       </div>
-      <span style="font-size:10px;color:#8a9280;">v2026-09-05-1</span>
+      <span style="font-size:10px;color:#8a9280;">v2026-09-05-6</span>
     </div>
   </header>
 
@@ -484,22 +484,6 @@
               partent vers GitHub comme le reste des données, donc elles arrivent aussi sur le téléphone sans rien faire de plus.
             </p>
 
-            <div class="warning-box" style="margin-bottom:12px;">
-              <strong>Expérimental</strong> — pour que le téléphone récupère les journaux directement depuis OneDrive,
-              sans passer par une tablette. Ça peut ne pas fonctionner (blocage de sécurité navigateur) ; la synchro
-              GitHub ci-dessus reste la solution fiable dans tous les cas.
-            </div>
-            <div class="interv-form" style="grid-template-columns:1fr auto;margin-bottom:8px;">
-              <div>
-                <label class="field-label">Lien de partage OneDrive du dossier Logs (lecture seule)</label>
-                <input type="text" id="oneDriveShareUrl" placeholder="https://1drv.ms/f/c/...">
-              </div>
-              <div style="display:flex;align-items:end;">
-                <button class="btn" id="btnFetchOneDriveShare">Récupérer maintenant</button>
-              </div>
-            </div>
-            <p class="sub" id="oneDriveShareStatus" style="margin:0 0 12px;"></p>
-
             <div style="display:flex;gap:12px;align-items:end;flex-wrap:wrap;">
               <div>
                 <button class="btn" id="btnImportLogs">Importer des journaux à la main (.txt)</button>
@@ -514,6 +498,10 @@
                   <option value="15">15 min +</option>
                 </select>
               </div>
+              <div style="flex:1;min-width:180px;">
+                <label class="field-label">Rechercher un champ</label>
+                <input type="text" id="logSessionSearch" placeholder="Nom du champ...">
+              </div>
             </div>
           </div>
         </div>
@@ -525,7 +513,7 @@
             <div style="overflow-x:auto;">
               <table class="ledger" id="logsSessionsTable" style="display:none;">
                 <thead>
-                  <tr><th>Date</th><th>Champ</th><th>Début</th><th>Fin</th><th>Durée</th><th></th></tr>
+                  <tr><th>Date</th><th>Champ</th><th>Véhicule/outil</th><th>Début</th><th>Fin</th><th>Durée</th><th></th></tr>
                 </thead>
                 <tbody id="logsSessionsBody"></tbody>
               </table>
@@ -534,7 +522,8 @@
         </div>
       </section>
 
-
+      <!-- ===== DONNEES ===== -->
+      <section class="view" id="view-donnees">
         <div class="view-head">
           <div>
             <h2>Données &amp; export</h2>
@@ -558,7 +547,35 @@
                 <label class="field-label">Adresse</label>
                 <input type="text" id="companyAddress" placeholder="Le Vigeant, 86150">
               </div>
+              <div>
+                <label class="field-label">Ville d'immatriculation (RCS)</label>
+                <input type="text" id="companyRcsCity" placeholder="Poitiers">
+              </div>
+              <div>
+                <label class="field-label">Délai de paiement (jours)</label>
+                <input type="number" step="1" id="companyPaymentDays" placeholder="30">
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <input type="checkbox" id="companyVatSubject" style="width:auto;">
+                <label class="field-label" style="margin:0;">Assujetti à la TVA</label>
+              </div>
+              <div>
+                <label class="field-label">Taux de TVA (%)</label>
+                <input type="number" step="0.1" id="companyVatRate" placeholder="20">
+              </div>
+              <div>
+                <label class="field-label">Prochain n° de facture</label>
+                <input type="number" step="1" id="companyNextInvoiceNumber" placeholder="1">
+              </div>
+              <div class="full">
+                <label class="field-label">N° TVA intracommunautaire (si assujetti)</label>
+                <input type="text" id="companyVatNumber" placeholder="FR12345678901">
+              </div>
             </div>
+            <p class="sub" style="margin:10px 0 0;">
+              Les prix saisis par intervention sont considérés comme des montants <strong>hors taxes (HT)</strong> —
+              la TVA est calculée et ajoutée automatiquement sur la facture.
+            </p>
           </div>
         </div>
 
@@ -659,21 +676,26 @@ const DEFAULT_TYPES = [
   {name:"Autre", field1Label:null, field2Label:null},
 ].map(t => ({...t, price: null}));
 
+const DEFAULT_COMPANY_INFO = {
+  name:'', address:'', siret:'', rcsCity:'', paymentDays:30,
+  vatSubject:true, vatRate:20, vatNumber:'', nextInvoiceNumber:1,
+};
+
 let state = {
   fields: {},          // id -> {id,name,client,boundary:[[lat,lon],...],areaHa,source}
   interventions: [],   // {id,fieldId,type,date,client,areaHa,price,detail1,detail2,details,notes,invoiced}
   types: [...DEFAULT_TYPES],   // {name, price, field1Label, field2Label}
-  companyInfo: {name:'', address:'', siret:''},
+  companyInfo: {...DEFAULT_COMPANY_INFO},
 };
 
 /* remet en forme un état chargé (fichier JSON ou dossier) : gère les anciennes
    données où "types" était un simple tableau de chaînes */
 function normalizeState(loaded){
-  const merged = Object.assign({fields:{},interventions:[],types:[...DEFAULT_TYPES],companyInfo:{name:'',address:'',siret:''},logSessions:[]}, loaded);
+  const merged = Object.assign({fields:{},interventions:[],types:[...DEFAULT_TYPES],companyInfo:{...DEFAULT_COMPANY_INFO},logSessions:[]}, loaded);
   if(Array.isArray(merged.types)){
     merged.types = merged.types.map(t => typeof t === 'string' ? {name:t, price:null} : t);
   }
-  if(!merged.companyInfo) merged.companyInfo = {name:'',address:'',siret:''};
+  merged.companyInfo = Object.assign({...DEFAULT_COMPANY_INFO}, merged.companyInfo||{});
   if(!Array.isArray(merged.logSessions)) merged.logSessions = [];
   return merged;
 }
@@ -1863,7 +1885,7 @@ function renderAll(){
 
 function hydrateLogSessionsFromState(){
   logSessions = (state.logSessions||[]).map(s=>({
-    fieldName: s.fieldName, start: new Date(s.start), end: new Date(s.end), durationMin: s.durationMin,
+    fieldName: s.fieldName, start: new Date(s.start), end: new Date(s.end), durationMin: s.durationMin, vehicle: s.vehicle||null,
   }));
   renderLogSessions();
 }
@@ -1873,6 +1895,12 @@ function renderCompanyInfo(){
   document.getElementById('companyName').value = ci.name || '';
   document.getElementById('companyAddress').value = ci.address || '';
   document.getElementById('companySiret').value = ci.siret || '';
+  document.getElementById('companyRcsCity').value = ci.rcsCity || '';
+  document.getElementById('companyPaymentDays').value = ci.paymentDays != null ? ci.paymentDays : 30;
+  document.getElementById('companyVatSubject').checked = ci.vatSubject !== false;
+  document.getElementById('companyVatRate').value = ci.vatRate != null ? ci.vatRate : 20;
+  document.getElementById('companyVatNumber').value = ci.vatNumber || '';
+  document.getElementById('companyNextInvoiceNumber').value = ci.nextInvoiceNumber || 1;
 }
 
 /* ============================================================
@@ -1880,7 +1908,6 @@ function renderCompanyInfo(){
    ============================================================ */
 document.getElementById('btnPickFolder').addEventListener('click', pickFolder);
 document.getElementById('btnPickLogsFolder').addEventListener('click', pickLogsFolder);
-document.getElementById('btnFetchOneDriveShare').addEventListener('click', fetchOneDriveShareLogs);
 document.getElementById('btnRefreshFolder').addEventListener('click', ()=>refreshFieldsFromFolder(true));
 document.getElementById('btnGoToGithub').addEventListener('click', ()=>{
   document.querySelector('.tab-btn[data-view="donnees"]').click();
@@ -1912,6 +1939,7 @@ document.getElementById('fileLogsInput').addEventListener('change', e=>{
   e.target.value = '';
 });
 document.getElementById('minSessionDuration').addEventListener('change', renderLogSessions);
+document.getElementById('logSessionSearch').addEventListener('input', renderLogSessions);
 
 document.getElementById('btnAddType').addEventListener('click', ()=>{
   const inp = document.getElementById('newTypeInput');
@@ -1950,12 +1978,18 @@ document.getElementById('btnExportPdf').addEventListener('click', ()=>{
   generateInvoicePdf(rows);
 });
 
-['companyName','companyAddress','companySiret'].forEach(id=>{
+['companyName','companyAddress','companySiret','companyRcsCity','companyPaymentDays','companyVatSubject','companyVatRate','companyVatNumber','companyNextInvoiceNumber'].forEach(id=>{
   document.getElementById(id).addEventListener('change', ()=>{
     state.companyInfo = {
       name: document.getElementById('companyName').value.trim(),
       address: document.getElementById('companyAddress').value.trim(),
       siret: document.getElementById('companySiret').value.trim(),
+      rcsCity: document.getElementById('companyRcsCity').value.trim(),
+      paymentDays: Number(document.getElementById('companyPaymentDays').value) || 30,
+      vatSubject: document.getElementById('companyVatSubject').checked,
+      vatRate: frenchNumber(document.getElementById('companyVatRate').value) || 0,
+      vatNumber: document.getElementById('companyVatNumber').value.trim(),
+      nextInvoiceNumber: Number(document.getElementById('companyNextInvoiceNumber').value) || 1,
     };
     scheduleSave();
   });
@@ -1970,8 +2004,11 @@ const AOG_WEEKDAYS = "Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday";
 const AOG_LOG_LINE_RE = new RegExp(
   "\\*\\*\\s*(Field closed|Closed|Opened)\\s*\\*\\*\\s+(.+?)\\s{2,}(?:"+AOG_WEEKDAYS+"),\\s*(\\d{1,2})\\s+(\\w+)\\s+(\\d{4})\\s+(\\d{1,2}):(\\d{2})"
 );
+// ex: "Profile loaded: T7210 nordsten.xml" / "Vehicle Loaded: T7210 ZA-TS.XML"
+// / "Registry -> Key VehicleFileName Saved to registry key with value: T7250 carrier"
+const AOG_VEHICLE_RE = /(?:Profile loaded|Vehicle [Ll]oaded|VehicleFileName Saved to registry key with value)\s*:\s*(.+)$/i;
 
-let logSessions = []; // {fieldName, start:Date, end:Date, durationMin}
+let logSessions = []; // {fieldName, start:Date, end:Date, durationMin, vehicle}
 let logsDirHandle = null;
 let logsAutoRefreshTimer = null;
 
@@ -2055,7 +2092,7 @@ async function refreshLogsFromFolder(showToast){
   }
   const sessions = computeSessionsFromEvents(allEvents);
   logSessions = sessions;
-  state.logSessions = sessions.map(s=>({fieldName:s.fieldName, start:s.start.toISOString(), end:s.end.toISOString(), durationMin:s.durationMin}));
+  state.logSessions = sessions.map(s=>({fieldName:s.fieldName, start:s.start.toISOString(), end:s.end.toISOString(), durationMin:s.durationMin, vehicle:s.vehicle||null}));
   renderLogSessions();
   scheduleSave();
   if(showToast) toast(sessions.length+" session(s) détectée(s) dans "+filesRead+" fichier(s)");
@@ -2071,7 +2108,12 @@ function parseAgLogDate(day, monthName, year, hour, minute){
 function parseAgLogText(text){
   const events = [];
   const lines = text.split(/\r\n|\r|\n/);
+  let currentVehicle = null;
   lines.forEach(line=>{
+    const vMatch = line.match(AOG_VEHICLE_RE);
+    if(vMatch){
+      currentVehicle = vMatch[1].trim().replace(/\.(xml)$/i, '');
+    }
     const m = line.match(AOG_LOG_LINE_RE);
     if(!m) return;
     const [, kind, fieldName, day, monthName, year, hour, minute] = m;
@@ -2081,78 +2123,10 @@ function parseAgLogText(text){
       type: /opened/i.test(kind) ? 'open' : 'close',
       fieldName: fieldName.trim(),
       date: dt,
+      vehicle: currentVehicle,
     });
   });
   return events;
-}
-
-/* Expérimental : récupère les fichiers d'un dossier OneDrive partagé (lien
-   "lecture seule", sans connexion) via l'ancienne API api.onedrive.com qui
-   supporte l'accès anonyme aux liens de partage. Peut échouer (CORS, lien
-   mal configuré) — dans ce cas la synchro GitHub reste le filet de sécurité. */
-function encodeOneDriveShareUrl(url){
-  const b64 = btoa(unescape(encodeURIComponent(url))).replace(/=+$/,'').replace(/\//g,'_').replace(/\+/g,'-');
-  return 'u!' + b64;
-}
-
-async function fetchOneDriveShareLogs(){
-  const statusEl = document.getElementById('oneDriveShareStatus');
-  const url = document.getElementById('oneDriveShareUrl').value.trim();
-  if(!url){ toast("Colle d'abord un lien de partage OneDrive"); return; }
-  statusEl.textContent = "Connexion en cours…";
-  try{
-    const encoded = encodeOneDriveShareUrl(url);
-    const listRes = await fetch(`https://api.onedrive.com/v1.0/shares/${encoded}/root/children`, {cache:"no-store"});
-    if(!listRes.ok){
-      throw new Error("Impossible de lister le dossier (code "+listRes.status+"). Vérifie que le lien est bien en accès \"Lecture\" et \"Toute personne disposant du lien\".");
-    }
-    const listData = await listRes.json();
-    const items = (listData.value || []).filter(it => /agopengps_events_log.*\.txt$/i.test(it.name));
-    if(!items.length){
-      statusEl.textContent = "Connecté, mais aucun fichier AgOpenGPS_Events_Log*.txt trouvé dans ce dossier.";
-      return;
-    }
-    let allEvents = [];
-    let readCount = 0;
-    for(const item of items){
-      const downloadUrl = item['@content.downloadUrl'] || item['@microsoft.graph.downloadUrl'];
-      if(!downloadUrl) continue;
-      try{
-        const fileRes = await fetch(downloadUrl, {cache:"no-store"});
-        if(!fileRes.ok) continue;
-        const text = await fileRes.text();
-        allEvents = allEvents.concat(parseAgLogText(text));
-        readCount++;
-      }catch(e){ console.error('Erreur téléchargement', item.name, e); }
-    }
-    if(!readCount){
-      throw new Error("Le dossier a été listé mais aucun fichier n'a pu être téléchargé (probable blocage de sécurité du navigateur).");
-    }
-    const sessions = computeSessionsFromEvents(allEvents);
-    logSessions = sessions;
-    state.logSessions = sessions.map(s=>({fieldName:s.fieldName, start:s.start.toISOString(), end:s.end.toISOString(), durationMin:s.durationMin}));
-    renderLogSessions();
-    scheduleSave();
-    saveOneDriveShareUrl(url);
-    statusEl.textContent = "Réussi : "+sessions.length+" session(s) depuis "+readCount+" fichier(s), le "+new Date().toLocaleTimeString('fr-FR');
-    toast("Journaux récupérés depuis OneDrive");
-  }catch(e){
-    console.error(e);
-    statusEl.textContent = "Échec : "+(e.message||e);
-  }
-}
-
-function saveOneDriveShareUrl(url){
-  try{ localStorage.setItem('carnet-de-champs-od-share', url); }catch(e){}
-}
-function tryRestoreOneDriveShareUrl(){
-  try{
-    const url = localStorage.getItem('carnet-de-champs-od-share');
-    if(url){
-      document.getElementById('oneDriveShareUrl').value = url;
-      fetchOneDriveShareLogs();
-    }
-  }catch(e){}
 }
 
 function computeSessionsFromEvents(allEvents){
@@ -2162,7 +2136,7 @@ function computeSessionsFromEvents(allEvents){
   allEvents.forEach(ev=>{
     const key = ev.fieldName.toLowerCase();
     if(ev.type === 'open'){
-      openTimes[key] = {name: ev.fieldName, date: ev.date};
+      openTimes[key] = {name: ev.fieldName, date: ev.date, vehicle: ev.vehicle};
     } else {
       const open = openTimes[key];
       if(open){
@@ -2173,6 +2147,7 @@ function computeSessionsFromEvents(allEvents){
             start: open.date,
             end: ev.date,
             durationMin,
+            vehicle: open.vehicle || null,
           });
         }
         delete openTimes[key];
@@ -2197,7 +2172,7 @@ async function importLogFiles(fileList){
   }
   const sessions = computeSessionsFromEvents(allEvents);
   logSessions = sessions;
-  state.logSessions = sessions.map(s=>({fieldName:s.fieldName, start:s.start.toISOString(), end:s.end.toISOString(), durationMin:s.durationMin}));
+  state.logSessions = sessions.map(s=>({fieldName:s.fieldName, start:s.start.toISOString(), end:s.end.toISOString(), durationMin:s.durationMin, vehicle:s.vehicle||null}));
   renderLogSessions();
   scheduleSave();
   toast(sessions.length+" session(s) détectée(s) dans "+fileList.length+" fichier(s)");
@@ -2205,7 +2180,10 @@ async function importLogFiles(fileList){
 
 function renderLogSessions(){
   const minDur = Number(document.getElementById('minSessionDuration').value);
-  const rows = logSessions.filter(s=>s.durationMin >= minDur);
+  const search = document.getElementById('logSessionSearch').value.trim().toLowerCase();
+  const rows = logSessions
+    .filter(s=>s.durationMin >= minDur)
+    .filter(s=>!search || s.fieldName.toLowerCase().includes(search));
   const table = document.getElementById('logsSessionsTable');
   const emptyNote = document.getElementById('logsEmptyNote');
   const body = document.getElementById('logsSessionsBody');
@@ -2219,7 +2197,7 @@ function renderLogSessions(){
   if(!rows.length){
     table.style.display = 'none';
     emptyNote.style.display = '';
-    emptyNote.textContent = "Aucune session ne dépasse la durée minimum choisie.";
+    emptyNote.textContent = "Aucune session ne correspond aux filtres (durée minimum / recherche).";
     return;
   }
   table.style.display = '';
@@ -2233,6 +2211,7 @@ function renderLogSessions(){
     return `<tr>
       <td>${fmtDate(s.start)}</td>
       <td>${escapeHtml(s.fieldName)}</td>
+      <td>${escapeHtml(s.vehicle||'—')}</td>
       <td>${fmtTime(s.start)}</td>
       <td>${fmtTime(s.end)}</td>
       <td>${fmtDur(s.durationMin)}</td>
@@ -2263,18 +2242,22 @@ function prefillInterventionFromSession(session){
   const iso = session.start.toISOString().slice(0,10);
   document.getElementById('fDate').value = iso;
   document.getElementById('fDuree').value = session.durationMin;
+  if(session.vehicle) document.getElementById('fNotes').value = 'Véhicule/outil : '+session.vehicle;
   document.getElementById('interventionForm').scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 function generateInvoicePdf(rows){
-
-
   if(!rows.length){ toast("Sélectionne au moins une intervention à facturer"); return; }
   if(typeof window.jspdf === 'undefined'){ toast("Le générateur de PDF n'a pas pu se charger (vérifie la connexion réseau)."); return; }
   const { jsPDF } = window.jspdf;
-  const ci = state.companyInfo || {};
+  const ci = Object.assign({...DEFAULT_COMPANY_INFO}, state.companyInfo||{});
+  const vatRate = ci.vatSubject ? (ci.vatRate || 0) : 0;
+  const paymentDays = ci.paymentDays || 30;
+  const emissionDate = new Date();
+  const dueDate = new Date(emissionDate.getTime() + paymentDays*86400000);
 
-  // regroupe par client : une section par client, sur une nouvelle page si plusieurs
+  // regroupe par client : une section par client, sur une nouvelle page si plusieurs,
+  // chacune avec son propre numéro de facture séquentiel
   const byClient = {};
   rows.forEach(i=>{
     const key = i.client || '(sans client)';
@@ -2283,10 +2266,15 @@ function generateInvoicePdf(rows){
   });
   const clients = Object.keys(byClient).sort((a,b)=>a.localeCompare(b,'fr'));
 
+  let invoiceNumber = ci.nextInvoiceNumber || 1;
+  const year = emissionDate.getFullYear();
+
   const doc = new jsPDF();
   clients.forEach((client, idx)=>{
     if(idx > 0) doc.addPage();
     const clientRows = byClient[client].slice().sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+    const numeroFacture = year+'-'+String(invoiceNumber).padStart(4,'0');
+    invoiceNumber++;
 
     doc.setFontSize(16);
     doc.text(ci.name || 'Facture', 14, 18);
@@ -2294,14 +2282,18 @@ function generateInvoicePdf(rows){
     doc.setTextColor(100);
     let y = 24;
     if(ci.address){ doc.text(ci.address, 14, y); y += 5; }
-    if(ci.siret){ doc.text('SIRET : '+ci.siret, 14, y); y += 5; }
+    let idLine = [];
+    if(ci.siret) idLine.push('SIRET : '+ci.siret);
+    if(ci.rcsCity) idLine.push('RCS '+ci.rcsCity);
+    if(idLine.length){ doc.text(idLine.join(' — '), 14, y); y += 5; }
+    if(ci.vatSubject && ci.vatNumber){ doc.text('N° TVA : '+ci.vatNumber, 14, y); y += 5; }
 
     doc.setTextColor(20);
     doc.setFontSize(12);
-    doc.text('Facture — '+client, 14, y+6);
+    doc.text('Facture n° '+numeroFacture+' — '+client, 14, y+6);
     doc.setFontSize(9);
     doc.setTextColor(100);
-    doc.text('Date d\'émission : '+new Date().toLocaleDateString('fr-FR'), 14, y+11);
+    doc.text("Date d'émission : "+emissionDate.toLocaleDateString('fr-FR')+'   ·   Échéance : '+dueDate.toLocaleDateString('fr-FR')+' ('+paymentDays+' jours)', 14, y+11);
 
     const body = clientRows.map(i=>{
       const f = state.fields[i.fieldId];
@@ -2309,27 +2301,72 @@ function generateInvoicePdf(rows){
       if(i.detail1) detailBits.push(i.detail1);
       if(i.detail2) detailBits.push(i.detail2);
       if(i.details) detailBits.push(i.details);
+      const hasPrice = typeof i.price === 'number';
+      const unitPrice = (hasPrice && i.areaHa) ? i.price / i.areaHa : (hasPrice ? i.price : null);
+      const unitLabel = i.areaHa ? '/ha' : '(forfait)';
       return [
         i.date ? formatDateFr(i.date) : '—',
         f ? f.name : '—',
         i.type,
         i.areaHa ? i.areaHa.toFixed(2).replace('.',',')+' ha' : '—',
         detailBits.join(' · ') || '—',
+        unitPrice != null ? formatPrice(unitPrice, true)+' '+unitLabel : '—',
         formatPrice(i.price, true),
       ];
     });
-    const total = clientRows.reduce((s,i)=> s + (typeof i.price==='number'?i.price:0), 0);
+    const totalHT = clientRows.reduce((s,i)=> s + (typeof i.price==='number'?i.price:0), 0);
+    const totalTVA = totalHT * vatRate / 100;
+    const totalTTC = totalHT + totalTVA;
 
     doc.autoTable({
       startY: y + 16,
-      head: [['Date','Champ','Type','Surface','Détails','Prix']],
+      head: [['Date','Champ','Type','Surface','Détails','P.U. HT','Montant HT']],
       body,
       styles: {fontSize:8, cellPadding:2},
       headStyles: {fillColor:[51,80,58]},
-      foot: [['','','','','Total', formatPrice(total, true)]],
-      footStyles: {fillColor:[244,243,236], textColor:20, fontStyle:'bold'},
+      columnStyles: {
+        3: {cellWidth:18},
+        4: {cellWidth:'auto'},
+        5: {cellWidth:24},
+        6: {cellWidth:24},
+      },
     });
+
+    let ty = doc.lastAutoTable.finalY + 6;
+    doc.setFontSize(9);
+    doc.setTextColor(20);
+    doc.text('Total HT', 140, ty, {align:'left'});
+    doc.text(formatPrice(totalHT, true), 196, ty, {align:'right'});
+    ty += 5;
+    if(ci.vatSubject){
+      doc.text('TVA ('+String(vatRate).replace('.',',')+' %)', 140, ty, {align:'left'});
+      doc.text(formatPrice(totalTVA, true), 196, ty, {align:'right'});
+      ty += 5;
+    } else {
+      doc.setFontSize(7.5);
+      doc.text('TVA non applicable, art. 293 B du CGI', 140, ty, {align:'left'});
+      doc.setFontSize(9);
+      ty += 5;
+    }
+    doc.setFontSize(10);
+    doc.text('Total TTC', 140, ty, {align:'left'});
+    doc.text(formatPrice(totalTTC, true), 196, ty, {align:'right'});
+    ty += 10;
+
+    doc.setFontSize(7.5);
+    doc.setTextColor(110);
+    const mentions = [
+      "En cas de retard de paiement, une pénalité au taux d'intérêt légal en vigueur sera appliquée, ainsi qu'une indemnité",
+      "forfaitaire pour frais de recouvrement de 40 €, conformément aux articles L441-10 et D441-5 du Code de commerce.",
+      "Pas d'escompte pour paiement anticipé.",
+    ];
+    mentions.forEach(line=>{ doc.text(line, 14, ty); ty += 4; });
   });
+
+  ci.nextInvoiceNumber = invoiceNumber;
+  state.companyInfo = ci;
+  renderCompanyInfo();
+  scheduleSave();
 
   const filename = clients.length === 1
     ? 'facture-'+clients[0].replace(/[^a-z0-9]+/gi,'-')+'.pdf'
@@ -2353,7 +2390,6 @@ document.getElementById('fDate').valueAsDate = new Date();
   await tryRestoreGithub();
   await tryRestoreDirHandle();
   await tryRestoreLogsDirHandle();
-  tryRestoreOneDriveShareUrl();
 })();
 
 if('serviceWorker' in navigator){
