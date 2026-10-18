@@ -257,7 +257,7 @@
         <span id="odLabel">GitHub non connecté</span>
         <button class="btn ghost small" id="btnGoToGithub">Connexion GitHub</button>
       </div>
-      <span style="font-size:10px;color:#8a9280;">v2026-09-05-6</span>
+      <span style="font-size:10px;color:#8a9280;">v2026-10-18-1</span>
     </div>
   </header>
 
@@ -1057,6 +1057,8 @@ function parseFieldKml(text, fallbackName){
   // nom du champ : essaie le Placemark de bordure, sinon "Field Stats"
   let fieldName = null;
   let areaHa = null;
+  let workedHa = null;
+  let missingHa = null;
 
   const folders = Array.from(doc.querySelectorAll('Folder'));
   const statsFolder = folders.find(f => (getName(f)||'').toLowerCase().includes('field stats'));
@@ -1068,6 +1070,13 @@ function parseFieldKml(text, fallbackName){
       if(m) fieldName = m[1].trim();
       const ha = txt.match(/Total Hectares:\s*([\d.,]+)/);
       if(ha) areaHa = frenchNumber(ha[1]);
+      // "Worked Hectares" = surface réellement couverte par les passages,
+      // calculée par AgOpenGPS à partir des sections (Sections.txt) donc déjà
+      // nette du recroisement/overlap — c'est la valeur "réellement travaillée"
+      const wh = txt.match(/Worked Hectares:\s*([\d.,]+)/);
+      if(wh) workedHa = frenchNumber(wh[1]);
+      const mh = txt.match(/Missing Hectares:\s*(-?[\d.,]+)/);
+      if(mh) missingHa = frenchNumber(mh[1]);
     }
   }
 
@@ -1092,7 +1101,7 @@ function parseFieldKml(text, fallbackName){
 
   if(!fieldName) fieldName = fallbackName || 'Champ sans nom';
 
-  return { name: fieldName, boundary, areaHa };
+  return { name: fieldName, boundary, areaHa, workedHa, missingHa };
 }
 
 function upsertFieldFromKml(parsed, sourceLabel, origin){
@@ -1102,6 +1111,8 @@ function upsertFieldFromKml(parsed, sourceLabel, origin){
   if(existing){
     existing.boundary = parsed.boundary.length ? parsed.boundary : existing.boundary;
     if(parsed.areaHa) existing.areaHa = parsed.areaHa;
+    existing.workedHa = parsed.workedHa != null ? parsed.workedHa : (existing.workedHa || null);
+    existing.missingHa = parsed.missingHa != null ? parsed.missingHa : (existing.missingHa || null);
     existing.source = sourceLabel;
     existing.origin = origin;
     existing.archived = false;
@@ -1110,6 +1121,8 @@ function upsertFieldFromKml(parsed, sourceLabel, origin){
     state.fields[id] = {
       id, name: parsed.name, client: '',
       boundary: parsed.boundary, areaHa: parsed.areaHa || null,
+      workedHa: parsed.workedHa != null ? parsed.workedHa : null,
+      missingHa: parsed.missingHa != null ? parsed.missingHa : null,
       source: sourceLabel, origin, archived: false,
     };
   }
@@ -1405,7 +1418,7 @@ function renderFields(){
       return `<div class="field-row ${rowClass}" style="${f.archived?'opacity:.55;':''}">
         <div style="flex:1;">
           <div class="fname">${escapeHtml(f.name)} ${f.archived ? '<span class="badge warn">retiré du dossier</span>' : ''}</div>
-          <div class="fmeta">${f.areaHa ? f.areaHa.toFixed(2).replace('.',',')+' ha · ' : ''}${hasB ? 'bordure tracée' : 'pas de bordure tracée'}</div>
+          <div class="fmeta">${f.areaHa ? f.areaHa.toFixed(2).replace('.',',')+' ha' : ''}${(f.workedHa!=null) ? ' <span title="Surface réellement travaillée (AgOpenGPS, net du recroisement)">· '+f.workedHa.toFixed(2).replace('.',',')+' ha travaillés</span>' : ''}${(f.areaHa||f.workedHa!=null) ? ' · ' : ''}${hasB ? 'bordure tracée' : 'pas de bordure tracée'}</div>
         </div>
         <input class="client-input" data-field="${f.id}" placeholder="Client" value="${escapeHtml(f.client||'')}">
         ${f.archived ? '' : `<button class="btn small" data-add-interv="${f.id}" title="Ajouter une intervention pour ce champ">+ Intervention</button>`}
@@ -1545,7 +1558,8 @@ function refreshFilterSelects(){
 document.getElementById('fChamp').addEventListener('change', e=>{
   const f = state.fields[e.target.value];
   if(f){
-    document.getElementById('fSurface').placeholder = f.areaHa ? f.areaHa.toFixed(2) : 'auto';
+    const refArea = (f.workedHa != null) ? f.workedHa : f.areaHa;
+    document.getElementById('fSurface').placeholder = refArea ? refArea.toFixed(2) : 'auto';
     document.getElementById('fClient').placeholder = f.client || 'auto (depuis le champ)';
   }
 });
@@ -1622,7 +1636,7 @@ document.getElementById('interventionForm').addEventListener('submit', e=>{
   const fieldId = document.getElementById('fChamp').value;
   const f = state.fields[fieldId];
   if(!f){ toast("Sélectionne un champ"); return; }
-  const surface = frenchNumber(document.getElementById('fSurface').value) || f.areaHa || null;
+  const surface = frenchNumber(document.getElementById('fSurface').value) || (f.workedHa != null ? f.workedHa : f.areaHa) || null;
   const client = document.getElementById('fClient').value.trim() || f.client || '';
 
   const data = {
@@ -2007,6 +2021,13 @@ const AOG_LOG_LINE_RE = new RegExp(
 // ex: "Profile loaded: T7210 nordsten.xml" / "Vehicle Loaded: T7210 ZA-TS.XML"
 // / "Registry -> Key VehicleFileName Saved to registry key with value: T7250 carrier"
 const AOG_VEHICLE_RE = /(?:Profile loaded|Vehicle [Ll]oaded|VehicleFileName Saved to registry key with value)\s*:\s*(.+)$/i;
+// ex: "15:15:05-> Program Started: Monday, 19 May 2025 15:15" — ancre de date fiable,
+// car la plupart des lignes du journal n'ont qu'un horodatage HH:MM:SS sans date
+const AOG_PROGRAM_START_RE = new RegExp(
+  "Program Started:\\s*(?:"+AOG_WEEKDAYS+"),\\s*(\\d{1,2})\\s+(\\w+)\\s+(\\d{4})"
+);
+// horodatage en tête de ligne, ex: "09:16:31-> ..."
+const AOG_LINE_TIME_RE = /^(\d{1,2}):(\d{2}):(\d{2})\s*->/;
 
 let logSessions = []; // {fieldName, start:Date, end:Date, durationMin, vehicle}
 let logsDirHandle = null;
@@ -2105,26 +2126,73 @@ function parseAgLogDate(day, monthName, year, hour, minute){
   return new Date(Number(year), m, Number(day), Number(hour), Number(minute));
 }
 
+/* Le véhicule/outil chargé n'est journalisé qu'au moment où on le change
+   (une ligne "Profile loaded" / "Vehicle Loaded" / registre), pas à chaque
+   ouverture de champ, et les fichiers AgOpenGPS_Events_Log sont découpés en
+   dizaines de rotations : un fichier donné peut très bien ne contenir aucune
+   ligne de changement d'outil tout en contenant des dizaines d'ouvertures de
+   champ. Il faut donc suivre "le dernier véhicule chargé" de façon globale et
+   chronologique, à travers TOUS les fichiers fusionnés — pas fichier par
+   fichier. Pour ça, chaque ligne "véhicule" est émise ici comme un événement
+   daté ({type:'vehicle', ...}), et c'est computeSessionsFromEvents() qui,
+   une fois tous les événements de tous les fichiers triés par date réelle,
+   fait avancer le véhicule courant au fil du temps.
+   La plupart des lignes du journal n'ont qu'un horodatage HH:MM:SS sans date
+   complète : on ancre la date courante sur les lignes "Program Started" et
+   "Opened/Closed" (qui portent une date complète), et on la fait avancer d'un
+   jour si une ligne ultérieure semble reculer dans le temps (passage de
+   minuit sans redémarrage du programme). */
 function parseAgLogText(text){
   const events = [];
   const lines = text.split(/\r\n|\r|\n/);
-  let currentVehicle = null;
-  lines.forEach(line=>{
-    const vMatch = line.match(AOG_VEHICLE_RE);
-    if(vMatch){
-      currentVehicle = vMatch[1].trim().replace(/\.(xml)$/i, '');
+  let anchorY=null, anchorM=null, anchorD=null;
+  let lastTimestamp = null;
+
+  function resolveTimestamp(hh, mm, ss){
+    if(anchorY==null) return null;
+    let dt = new Date(anchorY, anchorM, anchorD, Number(hh), Number(mm), Number(ss||0));
+    if(lastTimestamp && dt < new Date(lastTimestamp.getTime() - 2*3600*1000)){
+      dt = new Date(dt.getTime() + 24*3600*1000);
     }
+    return dt;
+  }
+
+  lines.forEach(line=>{
+    const tMatch = line.match(AOG_LINE_TIME_RE);
+
+    const pMatch = line.match(AOG_PROGRAM_START_RE);
+    if(pMatch){
+      const [, day, monthName, year] = pMatch;
+      const mi = AOG_MONTHS.indexOf(monthName);
+      if(mi !== -1){ anchorY = Number(year); anchorM = mi; anchorD = Number(day); }
+    }
+
+    const vMatch = line.match(AOG_VEHICLE_RE);
+    if(vMatch && tMatch){
+      const dt = resolveTimestamp(tMatch[1], tMatch[2], tMatch[3]);
+      if(dt){
+        events.push({type:'vehicle', vehicle: vMatch[1].trim().replace(/\.(xml)$/i, ''), date: dt});
+        lastTimestamp = dt;
+      }
+    }
+
     const m = line.match(AOG_LOG_LINE_RE);
-    if(!m) return;
-    const [, kind, fieldName, day, monthName, year, hour, minute] = m;
-    const dt = parseAgLogDate(day, monthName, year, hour, minute);
-    if(!dt) return;
-    events.push({
-      type: /opened/i.test(kind) ? 'open' : 'close',
-      fieldName: fieldName.trim(),
-      date: dt,
-      vehicle: currentVehicle,
-    });
+    if(m){
+      const [, kind, fieldName, day, monthName, year, hour, minute] = m;
+      const dt = parseAgLogDate(day, monthName, year, hour, minute);
+      if(dt){
+        anchorY = dt.getFullYear(); anchorM = dt.getMonth(); anchorD = dt.getDate();
+        events.push({
+          type: /opened/i.test(kind) ? 'open' : 'close',
+          fieldName: fieldName.trim(),
+          date: dt,
+        });
+        lastTimestamp = dt;
+      }
+    } else if(tMatch && !vMatch){
+      const dt = resolveTimestamp(tMatch[1], tMatch[2], tMatch[3]);
+      if(dt) lastTimestamp = dt;
+    }
   });
   return events;
 }
@@ -2133,10 +2201,15 @@ function computeSessionsFromEvents(allEvents){
   allEvents.sort((a,b)=> a.date - b.date);
   const openTimes = {}; // fieldName (lowercase) -> Date d'ouverture en cours
   const sessions = [];
+  let currentVehicle = null;
   allEvents.forEach(ev=>{
+    if(ev.type === 'vehicle'){
+      currentVehicle = ev.vehicle;
+      return;
+    }
     const key = ev.fieldName.toLowerCase();
     if(ev.type === 'open'){
-      openTimes[key] = {name: ev.fieldName, date: ev.date, vehicle: ev.vehicle};
+      openTimes[key] = {name: ev.fieldName, date: ev.date, vehicle: currentVehicle};
     } else {
       const open = openTimes[key];
       if(open){
@@ -2147,7 +2220,7 @@ function computeSessionsFromEvents(allEvents){
             start: open.date,
             end: ev.date,
             durationMin,
-            vehicle: open.vehicle || null,
+            vehicle: open.vehicle || currentVehicle || null,
           });
         }
         delete openTimes[key];
