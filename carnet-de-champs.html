@@ -1,0 +1,2482 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Carnet de Champs — Traçabilité parcellaire</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#20301f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Carnet de Champs">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f4f3ec;
+    --panel:#ffffff;
+    --ink:#22261e;
+    --muted:#6f7566;
+    --line:#dbd8c8;
+    --line-strong:#c7c3ae;
+    --green:#33503a;
+    --green-dark:#20301f;
+    --green-wash:#e8ede2;
+    --clay:#a15c2e;
+    --clay-dark:#83491f;
+    --clay-wash:#f2e3d2;
+    --danger:#a1402e;
+    --radius:3px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'Inter',system-ui,sans-serif;
+    font-size:14.5px;
+    line-height:1.5;
+  }
+  h1,h2,h3{font-family:'Fraunces',serif;font-weight:600;margin:0;}
+  button{font-family:inherit;}
+  ::selection{background:var(--clay-wash);}
+
+  /* ---- layout shell ---- */
+  #app{display:flex;flex-direction:column;min-height:100vh;}
+
+  header.top{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:14px 22px;
+    background:var(--green-dark);
+    color:#f4f3ec;
+    border-bottom:3px solid var(--clay);
+  }
+  header.top .brand{display:flex;align-items:baseline;gap:10px;}
+  header.top h1{font-size:20px;letter-spacing:.2px;color:#fbfaf5;}
+  header.top .tagline{font-size:12px;color:#c9d1c1;font-style:italic;}
+  .conn-status{
+    display:flex;align-items:center;gap:8px;font-size:12.5px;color:#dfe6d8;
+  }
+  .conn-dot{width:8px;height:8px;border-radius:50%;background:#8c9483;}
+  .conn-dot.on{background:#8fbf7a;}
+  .conn-dot.off{background:#c96a4f;}
+  .btn{
+    border:1px solid var(--line-strong);
+    background:var(--panel);
+    color:var(--ink);
+    padding:7px 13px;
+    border-radius:var(--radius);
+    cursor:pointer;
+    font-size:13px;
+    font-weight:500;
+  }
+  .btn:hover{border-color:var(--green);}
+  .btn.primary{
+    background:var(--clay);border-color:var(--clay-dark);color:#fff8f0;
+  }
+  .btn.primary:hover{background:var(--clay-dark);}
+  .btn.ghost{background:transparent;border-color:#4c5c47;color:#eef0e8;}
+  .btn.ghost:hover{background:rgba(255,255,255,.08);}
+  .btn.small{padding:4px 9px;font-size:12px;}
+  .btn.danger{color:var(--danger);border-color:var(--danger);background:#fff;}
+  .btn.danger:hover{background:var(--danger);color:#fff;}
+  .btn:disabled{opacity:.45;cursor:not-allowed;}
+
+  /* ---- shell body: tab rail + content ---- */
+  .shell{display:flex;flex:1;min-height:0;}
+  nav.rail{
+    width:168px;flex:none;
+    background:var(--green);
+    padding-top:18px;
+    display:flex;flex-direction:column;
+  }
+  nav.rail button{
+    text-align:left;
+    background:transparent;border:none;
+    color:#dbe4d3;
+    padding:12px 20px;
+    font-size:13.5px;font-weight:500;
+    cursor:pointer;
+    border-left:3px solid transparent;
+    letter-spacing:.2px;
+  }
+  nav.rail button .count{
+    float:right;color:#a9b79c;font-size:11.5px;
+  }
+  nav.rail button:hover{background:rgba(255,255,255,.06);}
+  nav.rail button.active{
+    background:var(--bg);color:var(--green-dark);
+    border-left-color:var(--clay);
+    font-weight:600;
+  }
+  nav.rail button.active .count{color:var(--clay-dark);}
+
+  main{flex:1;min-width:0;padding:22px 26px;overflow-y:auto;}
+  .view{display:none;}
+  .view.active{display:block;}
+  .view-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;}
+  .view-head h2{font-size:22px;color:var(--green-dark);}
+  .view-head p.sub{margin:4px 0 0;color:var(--muted);font-size:13px;}
+
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+  }
+  .panel + .panel{margin-top:16px;}
+  .panel .panel-title{
+    padding:11px 16px;border-bottom:1px solid var(--line);
+    font-family:'Fraunces',serif;font-weight:600;font-size:15px;color:var(--green-dark);
+    display:flex;align-items:center;justify-content:space-between;
+  }
+  .panel .panel-body{padding:16px;}
+
+  /* ---- champs view ---- */
+  .fields-layout{display:grid;grid-template-columns:1.1fr 1fr;gap:16px;align-items:start;}
+  #map{height:440px;border:1px solid var(--line);border-radius:var(--radius);background:#e9e7db;}
+  .field-row{
+    display:flex;align-items:center;gap:10px;
+    padding:10px 12px;
+    border-bottom:1px solid var(--line);
+    border-left:3px solid var(--line-strong);
+  }
+  .field-row:last-child{border-bottom:none;}
+  .field-row.has-boundary{border-left-color:var(--green);}
+  .field-row.no-boundary{border-left-color:var(--clay);}
+  .field-row .fname{font-weight:600;flex:1;}
+  .field-row .fmeta{font-size:12px;color:var(--muted);}
+  .field-row input.client-input{
+    width:120px;font-size:12.5px;padding:4px 6px;
+    border:1px solid var(--line-strong);border-radius:var(--radius);
+  }
+  .badge{
+    display:inline-block;font-size:11px;padding:2px 7px;border-radius:20px;
+    background:var(--green-wash);color:var(--green-dark);font-weight:600;
+  }
+  .badge.warn{background:var(--clay-wash);color:var(--clay-dark);}
+  .empty-note{color:var(--muted);font-size:13px;padding:18px 16px;text-align:center;}
+
+  .dropzone{
+    border:1.5px dashed var(--line-strong);border-radius:var(--radius);
+    padding:22px;text-align:center;color:var(--muted);font-size:13px;
+    background:#fbfaf5;
+  }
+  .dropzone strong{color:var(--ink);}
+
+  /* ---- interventions view ---- */
+  .interv-form{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+  .interv-form .full{grid-column:1/-1;}
+  .field-label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:500;}
+  select,input[type=text],input[type=date],input[type=number],textarea{
+    width:100%;padding:7px 9px;border:1px solid var(--line-strong);
+    border-radius:var(--radius);font-family:inherit;font-size:13.5px;color:var(--ink);
+    background:#fff;
+  }
+  textarea{resize:vertical;min-height:38px;}
+
+  table.ledger{width:100%;border-collapse:collapse;font-size:13px;}
+  table.ledger th{
+    text-align:left;font-weight:600;color:var(--green-dark);
+    font-size:11.5px;text-transform:none;letter-spacing:.2px;
+    padding:8px 10px;border-bottom:2px solid var(--line-strong);
+    background:var(--green-wash);
+  }
+  table.ledger td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top;}
+  table.ledger tr:hover td{background:#faf9f2;}
+  .type-pill{
+    display:inline-block;padding:2px 8px;border-radius:20px;font-size:11.5px;font-weight:600;
+    background:var(--clay-wash);color:var(--clay-dark);
+  }
+  .row-actions button{margin-right:4px;}
+
+  .filters{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
+  .filters > div{min-width:150px;}
+
+  /* ---- types view ---- */
+  .type-row{
+    display:flex;align-items:center;gap:10px;
+    padding:10px 16px;border-bottom:1px solid var(--line);
+  }
+  .type-row:last-child{border-bottom:none;}
+  .type-row .tname{flex:1;font-weight:600;}
+  .type-row input.price-input{width:110px;}
+  .add-type-row{display:flex;gap:8px;padding:14px 16px;border-top:1px solid var(--line);background:#fbfaf5;}
+  .add-type-row input#newTypeInput{flex:1;}
+
+  /* ---- data view ---- */
+  .kv{display:grid;grid-template-columns:180px 1fr;gap:6px 14px;font-size:13px;padding:16px;}
+  .kv dt{color:var(--muted);}
+  .kv dd{margin:0;}
+  .warning-box{
+    background:var(--clay-wash);border:1px solid var(--clay);color:var(--clay-dark);
+    padding:12px 14px;border-radius:var(--radius);font-size:13px;margin-bottom:16px;
+  }
+  .actions-row{display:flex;gap:10px;flex-wrap:wrap;padding:0 16px 16px;}
+  .toast{
+    position:fixed;bottom:18px;right:18px;
+    background:var(--green-dark);color:#f4f3ec;
+    padding:10px 16px;border-radius:var(--radius);font-size:13px;
+    box-shadow:0 4px 14px rgba(0,0,0,.2);
+    opacity:0;transform:translateY(8px);transition:all .25s ease;pointer-events:none;
+  }
+  .toast.show{opacity:1;transform:translateY(0);}
+
+  @media (max-width:880px){
+    .shell{flex-direction:column;}
+    nav.rail{width:100%;flex-direction:row;overflow-x:auto;padding-top:0;}
+    nav.rail button{border-left:none;border-bottom:3px solid transparent;white-space:nowrap;}
+    nav.rail button.active{border-left:none;border-bottom-color:var(--clay);}
+    .fields-layout{grid-template-columns:1fr;}
+    .interv-form{grid-template-columns:1fr 1fr;}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header class="top">
+    <div class="brand">
+      <h1>Carnet de Champs</h1>
+      <span class="tagline">traçabilité parcellaire &amp; facturation</span>
+    </div>
+    <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;">
+      <div class="conn-status">
+        <span class="conn-dot off" id="connDot"></span>
+        <span id="connLabel">Aucun dossier lié</span>
+        <button class="btn ghost small" id="btnPickFolder">Lier un dossier</button>
+      </div>
+      <div class="conn-status">
+        <span class="conn-dot off" id="odDot"></span>
+        <span id="odLabel">GitHub non connecté</span>
+        <button class="btn ghost small" id="btnGoToGithub">Connexion GitHub</button>
+      </div>
+      <span style="font-size:10px;color:#8a9280;">v2026-10-18-1</span>
+    </div>
+  </header>
+
+  <div id="reconnectBanner" style="display:none;align-items:center;gap:12px;background:var(--clay-wash);color:var(--clay-dark);padding:9px 22px;font-size:13px;">
+    <span></span>
+    <button class="btn small primary">Reconnecter le dossier</button>
+  </div>
+
+  <div class="shell">
+    <nav class="rail">
+      <button class="tab-btn active" data-view="champs">Champs <span class="count" id="countFields"></span></button>
+      <button class="tab-btn" data-view="interventions">Interventions <span class="count" id="countInterv"></span></button>
+      <button class="tab-btn" data-view="types">Types d'intervention</button>
+      <button class="tab-btn" data-view="temps">Temps passé</button>
+      <button class="tab-btn" data-view="donnees">Données &amp; export</button>
+    </nav>
+
+    <main>
+
+      <!-- ===== CHAMPS ===== -->
+      <section class="view active" id="view-champs">
+        <div class="view-head">
+          <div>
+            <h2>Champs</h2>
+            <p class="sub">Importés depuis les dossiers AgOpenGPS (fichiers <code>Field.kml</code>)</p>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn" id="btnImportKmlManual">Importer des .kml</button>
+            <input type="file" id="fileKmlInput" accept=".kml" multiple style="display:none;">
+          </div>
+        </div>
+
+        <div class="fields-layout">
+          <div id="map"></div>
+          <div class="panel">
+            <div class="panel-title">Liste des champs</div>
+            <div id="fieldsList"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== INTERVENTIONS ===== -->
+      <section class="view" id="view-interventions">
+        <div class="view-head">
+          <div>
+            <h2>Interventions</h2>
+            <p class="sub">Saisie des travaux réalisés, par champ et par date</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title" id="interventionFormTitle">Nouvelle intervention</div>
+          <div class="panel-body">
+            <form id="interventionForm" class="interv-form">
+              <div>
+                <label class="field-label">Champ</label>
+                <select id="fChamp" required></select>
+              </div>
+              <div>
+                <label class="field-label">Type</label>
+                <select id="fType" required></select>
+              </div>
+              <div>
+                <label class="field-label">Date</label>
+                <input type="date" id="fDate" required>
+              </div>
+              <div>
+                <label class="field-label">Surface (ha)</label>
+                <input type="number" step="0.01" id="fSurface" placeholder="auto">
+              </div>
+              <div>
+                <label class="field-label">Client</label>
+                <input type="text" id="fClient" placeholder="auto (depuis le champ)">
+              </div>
+              <div>
+                <label class="field-label">Prix (€)</label>
+                <input type="number" step="0.01" id="fPrix" placeholder="0,00">
+              </div>
+              <div>
+                <label class="field-label">Durée (min)</label>
+                <input type="number" step="1" id="fDuree" placeholder="auto/manuel">
+              </div>
+              <div id="fDetail1Wrap" style="display:none;">
+                <label class="field-label" id="fDetail1Label">Détail 1</label>
+                <input type="text" id="fDetail1">
+              </div>
+              <div id="fDetail2Wrap" style="display:none;">
+                <label class="field-label" id="fDetail2Label">Détail 2</label>
+                <input type="text" id="fDetail2">
+              </div>
+              <div class="full" style="grid-column:span 3;">
+                <label class="field-label">Détails complémentaires</label>
+                <input type="text" id="fDetails">
+              </div>
+              <div class="full">
+                <label class="field-label">Remarques</label>
+                <textarea id="fNotes"></textarea>
+              </div>
+              <div class="full" style="display:flex;align-items:center;gap:16px;">
+                <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+                  <input type="checkbox" id="fInvoiced"> Déjà facturé
+                </label>
+              </div>
+              <div class="full" style="display:flex;justify-content:flex-end;gap:10px;">
+                <button type="button" class="btn" id="btnCancelEdit" style="display:none;">Annuler la modification</button>
+                <button type="submit" class="btn primary" id="btnSubmitInterv">Enregistrer l'intervention</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Historique</div>
+          <div class="panel-body">
+            <div class="filters">
+              <div>
+                <label class="field-label">Client</label>
+                <select id="filterClient"><option value="">Tous</option></select>
+              </div>
+              <div>
+                <label class="field-label">Champ</label>
+                <select id="filterField"><option value="">Tous</option></select>
+              </div>
+              <div>
+                <label class="field-label">Depuis le</label>
+                <input type="date" id="filterFrom">
+              </div>
+              <div>
+                <label class="field-label">Jusqu'au</label>
+                <input type="date" id="filterTo">
+              </div>
+              <div>
+                <label class="field-label">Facturation</label>
+                <select id="filterInvoiced">
+                  <option value="">Toutes</option>
+                  <option value="no">Non facturées</option>
+                  <option value="yes">Facturées</option>
+                </select>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <div style="font-size:13px;color:var(--muted);">
+                <span id="selectionCount">0 sélectionnée(s)</span> · Total affiché : <strong id="totalPrix">0,00 €</strong>
+              </div>
+              <div style="display:flex;gap:8px;">
+                <button class="btn small" id="btnExportPdf" disabled>Facture PDF (sélection)</button>
+                <button class="btn small" id="btnExportSelection" disabled>Exporter la sélection (.csv)</button>
+              </div>
+            </div>
+            <div style="overflow-x:auto;">
+              <table class="ledger">
+                <thead>
+                  <tr>
+                    <th style="width:26px;"><input type="checkbox" id="selectAllRows"></th>
+                    <th>Date</th><th>Client</th><th>Champ</th><th>Type</th><th>Surf. (ha)</th><th>Prix</th><th>Détails</th><th>Facturé</th><th></th>
+                  </tr>
+                </thead>
+                <tbody id="interventionsBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Récapitulatif par client</div>
+          <div class="panel-body">
+            <p class="sub" style="margin-top:0;">Calculé sur les interventions actuellement affichées ci-dessus (mêmes filtres).</p>
+            <div style="overflow-x:auto;">
+              <table class="ledger">
+                <thead>
+                  <tr><th>Client</th><th>Interventions</th><th>Surface (ha)</th><th>Facturé</th><th>Non facturé</th><th>Total</th></tr>
+                </thead>
+                <tbody id="clientSummaryBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== TYPES ===== -->
+      <section class="view" id="view-types">
+        <div class="view-head">
+          <div>
+            <h2>Types d'intervention</h2>
+            <p class="sub">Ajoute ou supprime les types proposés à la saisie</p>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">Liste des types</div>
+          <div id="typeList"></div>
+          <div class="add-type-row">
+            <input type="text" id="newTypeInput" placeholder="Nouveau type (ex. Broyage, Roulage…)">
+            <input type="number" step="0.01" id="newTypePrice" placeholder="Prix (€)" style="max-width:110px;">
+            <input type="text" id="newTypeField1" placeholder="Libellé champ 1 (optionnel)" style="max-width:170px;">
+            <input type="text" id="newTypeField2" placeholder="Libellé champ 2 (optionnel)" style="max-width:170px;">
+            <button class="btn primary small" id="btnAddType">Ajouter</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== TEMPS PASSÉ ===== -->
+      <section class="view" id="view-temps">
+        <div class="view-head">
+          <div>
+            <h2>Temps passé</h2>
+            <p class="sub">Calculé depuis les journaux d'événements AgOpenGPS (fichiers AgOpenGPS_Events_Log*.txt)</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-body">
+            <p class="sub" style="margin-top:0;">
+              Ces fichiers se trouvent dans le dossier <code>Logs</code> d'AgOpenGPS (à côté du dossier <code>Fields</code>).
+              Ils contiennent une ligne à chaque ouverture/fermeture de champ, avec la date et l'heure — ça permet de
+              calculer combien de temps a été passé sur chaque champ, à chaque session.
+            </p>
+            <div class="conn-status" style="margin-bottom:12px;">
+              <span class="conn-dot off" id="logsConnDot"></span>
+              <span id="logsConnLabel">Aucun dossier de journaux lié</span>
+              <button class="btn small" id="btnPickLogsFolder">Lier le dossier Logs</button>
+            </div>
+            <p class="sub" style="margin:0 0 12px;">
+              Une fois lié (sur la tablette), les journaux sont revérifiés automatiquement — les sessions calculées
+              partent vers GitHub comme le reste des données, donc elles arrivent aussi sur le téléphone sans rien faire de plus.
+            </p>
+
+            <div style="display:flex;gap:12px;align-items:end;flex-wrap:wrap;">
+              <div>
+                <button class="btn" id="btnImportLogs">Importer des journaux à la main (.txt)</button>
+                <input type="file" id="fileLogsInput" accept=".txt" multiple style="display:none;">
+              </div>
+              <div>
+                <label class="field-label">Durée minimum affichée</label>
+                <select id="minSessionDuration">
+                  <option value="0">Toutes</option>
+                  <option value="1">1 min +</option>
+                  <option value="5" selected>5 min +</option>
+                  <option value="15">15 min +</option>
+                </select>
+              </div>
+              <div style="flex:1;min-width:180px;">
+                <label class="field-label">Rechercher un champ</label>
+                <input type="text" id="logSessionSearch" placeholder="Nom du champ...">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Sessions détectées</div>
+          <div class="panel-body">
+            <div id="logsEmptyNote" class="empty-note">Importe des journaux pour voir les sessions détectées.</div>
+            <div style="overflow-x:auto;">
+              <table class="ledger" id="logsSessionsTable" style="display:none;">
+                <thead>
+                  <tr><th>Date</th><th>Champ</th><th>Véhicule/outil</th><th>Début</th><th>Fin</th><th>Durée</th><th></th></tr>
+                </thead>
+                <tbody id="logsSessionsBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== DONNEES ===== -->
+      <section class="view" id="view-donnees">
+        <div class="view-head">
+          <div>
+            <h2>Données &amp; export</h2>
+            <p class="sub">Sauvegarde locale et export pour la facturation</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Mes coordonnées (en-tête des factures PDF)</div>
+          <div class="panel-body">
+            <div class="interv-form" style="grid-template-columns:1fr 1fr;">
+              <div>
+                <label class="field-label">Nom / raison sociale</label>
+                <input type="text" id="companyName" placeholder="EARL La Grand'Fat">
+              </div>
+              <div>
+                <label class="field-label">SIRET</label>
+                <input type="text" id="companySiret" placeholder="123 456 789 00012">
+              </div>
+              <div class="full">
+                <label class="field-label">Adresse</label>
+                <input type="text" id="companyAddress" placeholder="Le Vigeant, 86150">
+              </div>
+              <div>
+                <label class="field-label">Ville d'immatriculation (RCS)</label>
+                <input type="text" id="companyRcsCity" placeholder="Poitiers">
+              </div>
+              <div>
+                <label class="field-label">Délai de paiement (jours)</label>
+                <input type="number" step="1" id="companyPaymentDays" placeholder="30">
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <input type="checkbox" id="companyVatSubject" style="width:auto;">
+                <label class="field-label" style="margin:0;">Assujetti à la TVA</label>
+              </div>
+              <div>
+                <label class="field-label">Taux de TVA (%)</label>
+                <input type="number" step="0.1" id="companyVatRate" placeholder="20">
+              </div>
+              <div>
+                <label class="field-label">Prochain n° de facture</label>
+                <input type="number" step="1" id="companyNextInvoiceNumber" placeholder="1">
+              </div>
+              <div class="full">
+                <label class="field-label">N° TVA intracommunautaire (si assujetti)</label>
+                <input type="text" id="companyVatNumber" placeholder="FR12345678901">
+              </div>
+            </div>
+            <p class="sub" style="margin:10px 0 0;">
+              Les prix saisis par intervention sont considérés comme des montants <strong>hors taxes (HT)</strong> —
+              la TVA est calculée et ajoutée automatiquement sur la facture.
+            </p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Synchronisation multi-appareils (GitHub)</div>
+          <div class="panel-body">
+            <p class="sub" style="margin-top:0;">
+              Stocke les données (champs, interventions, types) dans un fichier sur un dépôt GitHub
+              <strong>privé</strong>, pour les retrouver sur tous tes appareils, y compris ton téléphone.
+              Utilise un dépôt séparé de celui qui héberge l'appli — tes données de facturation ne doivent pas être publiques.
+            </p>
+            <div class="interv-form" style="grid-template-columns:1fr 1fr;">
+              <div>
+                <label class="field-label">Propriétaire / dépôt</label>
+                <input type="text" id="ghRepo" placeholder="ex. lud86/carnet-de-champs-data">
+              </div>
+              <div>
+                <label class="field-label">Chemin du fichier</label>
+                <input type="text" id="ghPath" placeholder="carnet-donnees.json" value="carnet-donnees.json">
+              </div>
+              <div class="full">
+                <label class="field-label">Jeton d'accès personnel (Personal Access Token)</label>
+                <div style="display:flex;gap:8px;">
+                  <input type="password" id="ghToken" placeholder="ghp_..." autocomplete="off" style="flex:1;">
+                  <button type="button" class="btn small" id="btnToggleGhToken">Afficher</button>
+                </div>
+              </div>
+              <div class="full" style="display:flex;gap:10px;">
+                <button class="btn primary" id="btnGhConnect">Connecter</button>
+                <button class="btn" id="btnGhReload">Recharger maintenant</button>
+                <button class="btn" id="btnGhDisconnect">Déconnecter</button>
+              </div>
+            </div>
+            <p class="sub" id="ghSyncStatus" style="margin:10px 0 0;"></p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Stockage local (tablette)</div>
+          <div class="panel-body">
+            <div class="warning-box" id="fsApiWarning" style="display:none;">
+              Ce navigateur ne permet pas l'écriture directe dans un dossier. Utilise les boutons
+              « Exporter les données » / « Importer les données » ci-dessous pour sauvegarder et
+              recharger ton travail d'une session à l'autre.
+            </div>
+            <dl class="kv">
+              <dt>Dossier lié</dt><dd id="dataFolderName">Aucun</dd>
+              <dt>Dernière vérification du dossier</dt><dd id="lastFolderScan">—</dd>
+              <dt>Fichier de données</dt><dd><code>carnet-donnees.json</code></dd>
+              <dt>Dernière sauvegarde</dt><dd id="lastSaved">—</dd>
+              <dt>Adresse actuelle</dt><dd><code id="currentOrigin"></code></dd>
+            </dl>
+            <p class="sub" style="padding:0 16px 14px;margin:0;">
+              Pour que la liaison au dossier reste stable d'une session à l'autre, lance l'appli via
+              <strong>Lancer-Carnet-de-Champs.bat</strong> plutôt qu'en double-cliquant directement sur le fichier HTML —
+              ça ouvre l'appli sur une adresse locale fixe (<code>http://localhost:8743</code>) que le navigateur
+              retient mieux qu'un fichier ouvert directement. Le dossier est revérifié automatiquement toutes
+              les minutes ; le bouton ci-dessous permet de forcer une vérification immédiate.
+            </p>
+            <div class="actions-row" style="padding-top:0;">
+              <button class="btn small" id="btnRefreshFolder">Revérifier le dossier maintenant</button>
+            </div>
+          </div>
+          <div class="actions-row">
+            <button class="btn" id="btnExportJson">Exporter les données (.json)</button>
+            <button class="btn" id="btnImportJson">Importer les données (.json)</button>
+            <input type="file" id="jsonInput" accept=".json" style="display:none;">
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Export facturation (.csv)</div>
+          <div class="panel-body">
+            <p class="sub" style="margin-top:0;">Exporte toutes les interventions filtrées dans l'onglet « Interventions ». Pour exporter une seule intervention ou une sélection précise, utilise les boutons directement dans le tableau de l'onglet Interventions.</p>
+          </div>
+          <div class="actions-row">
+            <button class="btn primary" id="btnExportCsv">Exporter le CSV</button>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   ÉTAT DE L'APPLICATION
+   ============================================================ */
+const DEFAULT_TYPES = [
+  {name:"Semis", field1Label:"Variété", field2Label:"Densité"},
+  {name:"Pulvérisation", field1Label:"Produit", field2Label:"Dose"},
+  {name:"Travail du sol", field1Label:"Façon culturale", field2Label:null},
+  {name:"Récolte", field1Label:null, field2Label:null},
+  {name:"Épandage", field1Label:"Produit", field2Label:"Dose"},
+  {name:"Autre", field1Label:null, field2Label:null},
+].map(t => ({...t, price: null}));
+
+const DEFAULT_COMPANY_INFO = {
+  name:'', address:'', siret:'', rcsCity:'', paymentDays:30,
+  vatSubject:true, vatRate:20, vatNumber:'', nextInvoiceNumber:1,
+};
+
+let state = {
+  fields: {},          // id -> {id,name,client,boundary:[[lat,lon],...],areaHa,source}
+  interventions: [],   // {id,fieldId,type,date,client,areaHa,price,detail1,detail2,details,notes,invoiced}
+  types: [...DEFAULT_TYPES],   // {name, price, field1Label, field2Label}
+  companyInfo: {...DEFAULT_COMPANY_INFO},
+};
+
+/* remet en forme un état chargé (fichier JSON ou dossier) : gère les anciennes
+   données où "types" était un simple tableau de chaînes */
+function normalizeState(loaded){
+  const merged = Object.assign({fields:{},interventions:[],types:[...DEFAULT_TYPES],companyInfo:{...DEFAULT_COMPANY_INFO},logSessions:[]}, loaded);
+  if(Array.isArray(merged.types)){
+    merged.types = merged.types.map(t => typeof t === 'string' ? {name:t, price:null} : t);
+  }
+  merged.companyInfo = Object.assign({...DEFAULT_COMPANY_INFO}, merged.companyInfo||{});
+  if(!Array.isArray(merged.logSessions)) merged.logSessions = [];
+  return merged;
+}
+
+function getType(name){
+  return state.types.find(t=>t.name===name);
+}
+
+let dirHandle = null;       // File System Access API directory handle
+let fileHandle = null;      // handle to carnet-donnees.json inside dirHandle
+let map, layerGroup;
+let saveTimer = null;
+let ghSaveTimer = null;
+
+const fsApiSupported = 'showDirectoryPicker' in window;
+
+/* ============================================================
+   SYNCHRONISATION GITHUB (multi-appareils, dépôt privé)
+   ============================================================ */
+const GH_CONFIG_KEY = "carnet-de-champs-gh-config";
+let ghConfig = null;     // {repo: "owner/name", path: "...", token: "..."}
+let ghSha = null;        // sha du fichier distant, nécessaire pour le mettre à jour
+
+// encodage/décodage base64 correct pour du texte UTF-8 (accents, etc.)
+function utf8ToBase64(str){
+  return btoa(unescape(encodeURIComponent(str)));
+}
+function base64ToUtf8(str){
+  return decodeURIComponent(escape(atob(str)));
+}
+
+function loadGhConfig(){
+  try{
+    const raw = localStorage.getItem(GH_CONFIG_KEY);
+    return raw ? JSON.parse(raw) : null;
+  }catch(e){ return null; }
+}
+function saveGhConfig(cfg){
+  localStorage.setItem(GH_CONFIG_KEY, JSON.stringify(cfg));
+}
+function clearGhConfig(){
+  localStorage.removeItem(GH_CONFIG_KEY);
+}
+
+function updateGithubUI(connected){
+  document.getElementById('odDot').className = 'conn-dot ' + (connected ? 'on' : 'off');
+  document.getElementById('odLabel').textContent = connected
+    ? ('GitHub : ' + ghConfig.repo)
+    : 'GitHub non connecté';
+}
+
+async function ghApiFetch(method, body){
+  const cacheBust = method === 'GET' ? (`?t=${Date.now()}`) : '';
+  const url = `https://api.github.com/repos/${ghConfig.repo}/contents/${ghConfig.path}${cacheBust}`;
+  const opts = {
+    method,
+    cache: "no-store",
+    headers: {
+      "Authorization": "Bearer " + ghConfig.token,
+      "Accept": "application/vnd.github+json",
+    }
+  };
+  if(body){
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(body);
+  }
+  return fetch(url, opts);
+}
+
+/* recharge l'état depuis GitHub (sha inchangé = pas de conflit possible en lecture).
+   silent=true : pas de toast si rien de neuf (utilisé pour les vérifications
+   automatiques en arrière-plan). */
+/* Récupère le contenu réel d'un fichier via son download_url plutôt que le
+   champ "content" (base64) de l'API Contents, qui est omis ou tronqué par
+   GitHub au-delà d'environ 1 Mo. */
+async function ghFetchContent(meta){
+  const url = `https://api.github.com/repos/${ghConfig.repo}/contents/${ghConfig.path}?t=${Date.now()}`;
+  const res = await fetch(url, {
+    cache: "no-store",
+    headers: {
+      "Authorization": "Bearer " + ghConfig.token,
+      // demande le contenu brut du fichier plutôt que l'enveloppe JSON+base64,
+      // qui a une limite de taille d'environ 1 Mo
+      "Accept": "application/vnd.github.v3.raw",
+    }
+  });
+  if(!res.ok) throw new Error("Lecture du fichier impossible (" + res.status + ")");
+  return (await res.text()).trim();
+}
+
+async function ghLoadNow(silent){
+  if(!ghConfig) return;
+  try{
+    const res = await ghApiFetch('GET');
+    if(!res.ok){
+      const body = await res.json().catch(()=>({}));
+      throw new Error(res.status + (body.message ? " — "+body.message : ""));
+    }
+    const data = await res.json();
+    if(data.sha === ghSha){
+      // rien de nouveau côté GitHub
+      if(!silent) toast("Déjà à jour");
+      return;
+    }
+    ghSha = data.sha;
+    const decoded = await ghFetchContent(data);
+    if(decoded){
+      const loaded = JSON.parse(decoded);
+      state = normalizeState(loaded);
+      if(dirHandle) await refreshFieldsFromFolder(false);
+      renderAll();
+    }
+    document.getElementById('ghSyncStatus').textContent = "Rechargé depuis GitHub : "+new Date().toLocaleTimeString('fr-FR')
+      +" — "+Object.keys(state.fields).length+" champ(s), "+state.interventions.length+" intervention(s)";
+    if(!silent) toast("Données rechargées depuis GitHub");
+  }catch(e){
+    console.error("Erreur de rechargement GitHub", e);
+    if(!silent) toast("Rechargement GitHub impossible : " + (e.message || e));
+  }
+}
+
+async function connectGithub(){
+  const repo = document.getElementById('ghRepo').value.trim();
+  const path = document.getElementById('ghPath').value.trim() || 'carnet-donnees.json';
+  const token = document.getElementById('ghToken').value.trim();
+
+  if(!repo || !repo.includes('/')){
+    toast("Indique le dépôt au format propriétaire/nom (ex. lud86/carnet-de-champs-data)");
+    return;
+  }
+  if(!token){
+    toast("Le jeton d'accès personnel est requis");
+    return;
+  }
+  ghConfig = {repo, path, token};
+
+  try{
+    const res = await ghApiFetch('GET');
+    if(res.status === 404){
+      // rien encore sur GitHub : on y crée le fichier avec l'état actuel
+      ghSha = null;
+      await ghSaveNow(false, true);
+      saveGhConfig(ghConfig);
+      updateGithubUI(true);
+      startGhAutoRefresh();
+      toast("Connecté à GitHub — fichier de données créé");
+      return;
+    }
+    if(res.status === 401 || res.status === 403){
+      const body = await res.json().catch(()=>({}));
+      toast("GitHub a refusé le jeton (" + res.status + (body.message ? " — "+body.message : "") + ")");
+      ghConfig = null;
+      return;
+    }
+    if(!res.ok){
+      const body = await res.json().catch(()=>({}));
+      throw new Error(res.status + (body.message ? " — "+body.message : ""));
+    }
+    const data = await res.json();
+    ghSha = data.sha;
+    const decoded = await ghFetchContent(data);
+    if(!decoded){
+      // fichier existant mais vide : on l'initialise avec l'état actuel
+      await ghSaveNow(false, true);
+      saveGhConfig(ghConfig);
+      updateGithubUI(true);
+      startGhAutoRefresh();
+      toast("Fichier GitHub vide — initialisé avec les données actuelles");
+      return;
+    }
+    const loaded = JSON.parse(decoded);
+    state = normalizeState(loaded);
+    if(dirHandle) await refreshFieldsFromFolder(false); // refusionne les champs du dossier déjà lié
+    renderAll();
+    saveGhConfig(ghConfig);
+    updateGithubUI(true);
+    startGhAutoRefresh();
+    document.getElementById('ghSyncStatus').textContent = "Chargé depuis GitHub : "+Object.keys(state.fields).length+" champ(s), "+state.interventions.length+" intervention(s)";
+    toast("Données chargées depuis GitHub");
+  }catch(e){
+    console.error(e);
+    toast("Connexion GitHub impossible : " + (e.message || e));
+    ghConfig = null;
+  }
+}
+
+function disconnectGithub(){
+  ghConfig = null;
+  ghSha = null;
+  clearGhConfig();
+  updateGithubUI(false);
+  toast("Déconnecté de GitHub");
+}
+
+async function ghSaveNow(retrying, allowEmpty){
+  if(!ghConfig) return;
+  const isEmpty = Object.keys(state.fields).length === 0 && state.interventions.length === 0;
+  if(isEmpty && !allowEmpty){
+    // garde-fou : on ne pousse jamais un état vide vers GitHub sauf demande
+    // explicite (première initialisation) — ça évite d'écraser des données
+    // existantes si l'état local n'a pas encore fini de se charger.
+    console.warn("Envoi GitHub bloqué : état local vide (protection anti-écrasement)");
+    const statusEl = document.getElementById('ghSyncStatus');
+    if(statusEl) statusEl.textContent = "Envoi bloqué ("+new Date().toLocaleTimeString('fr-FR')+") : l'état local est vide, protection anti-écrasement activée.";
+    return;
+  }
+  try{
+    const body = {
+      message: "Mise à jour depuis Carnet de Champs",
+      content: utf8ToBase64(JSON.stringify(state, null, 2)),
+    };
+    if(ghSha) body.sha = ghSha;
+    const res = await ghApiFetch('PUT', body);
+    if(res.status === 409 && !retrying){
+      // conflit : un autre appareil a écrit entre-temps — on récupère le sha
+      // à jour et on réessaie une fois, sans perdre les modifications locales
+      const fresh = await ghApiFetch('GET');
+      if(fresh.ok){
+        const freshData = await fresh.json();
+        ghSha = freshData.sha;
+        return ghSaveNow(true, allowEmpty);
+      }
+    }
+    if(!res.ok){
+      const err = await res.json().catch(()=>({}));
+      throw new Error(res.status + (err.message ? " — "+err.message : ''));
+    }
+    const data = await res.json();
+    ghSha = data.content.sha;
+    const statusEl = document.getElementById('ghSyncStatus');
+    if(statusEl){
+      statusEl.textContent = "Dernier envoi réussi : "+new Date().toLocaleTimeString('fr-FR')
+        +" — "+Object.keys(state.fields).length+" champ(s), "+state.interventions.length+" intervention(s)";
+    }
+  }catch(e){
+    console.error("Erreur de sauvegarde GitHub", e);
+    toast("Échec de la sauvegarde GitHub : " + (e.message || e));
+    const statusEl = document.getElementById('ghSyncStatus');
+    if(statusEl) statusEl.textContent = "Échec du dernier envoi ("+new Date().toLocaleTimeString('fr-FR')+") : "+(e.message||e);
+  }
+}
+
+function scheduleGhSave(){
+  if(!ghConfig) return;
+  clearTimeout(ghSaveTimer);
+  ghSaveTimer = setTimeout(ghSaveNow, 800);
+}
+
+let ghAutoRefreshTimer = null;
+function startGhAutoRefresh(){
+  clearInterval(ghAutoRefreshTimer);
+  ghAutoRefreshTimer = setInterval(()=>{
+    if(ghConfig) ghLoadNow(true);
+  }, 45000);
+}
+
+async function tryRestoreGithub(){
+  const cfg = loadGhConfig();
+  if(!cfg) return;
+  document.getElementById('ghRepo').value = cfg.repo;
+  document.getElementById('ghPath').value = cfg.path;
+  document.getElementById('ghToken').value = cfg.token;
+  ghConfig = cfg;
+  try{
+    const res = await ghApiFetch('GET');
+    if(!res.ok){
+      const body = await res.json().catch(()=>({}));
+      throw new Error(res.status + (body.message ? " — "+body.message : ""));
+    }
+    const data = await res.json();
+    ghSha = data.sha;
+    const decoded = await ghFetchContent(data);
+    if(!decoded){
+      updateGithubUI(true);
+      startGhAutoRefresh();
+      return;
+    }
+    const loaded = JSON.parse(decoded);
+    state = normalizeState(loaded);
+    renderAll();
+    updateGithubUI(true);
+    startGhAutoRefresh();
+  }catch(e){
+    console.error("Reconnexion GitHub échouée", e);
+    toast("Reconnexion GitHub échouée : " + (e.message || e));
+    updateGithubUI(false);
+  }
+}
+
+/* ---- persistance du handle de dossier entre sessions (IndexedDB) ---- */
+const IDB_NAME = 'carnet-de-champs';
+const IDB_STORE = 'handles';
+function idbOpen(){
+  return new Promise((resolve,reject)=>{
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = ()=> req.result.createObjectStore(IDB_STORE);
+    req.onsuccess = ()=> resolve(req.result);
+    req.onerror = ()=> reject(req.error);
+  });
+}
+async function idbSet(key, val){
+  try{
+    const db = await idbOpen();
+    return new Promise((resolve,reject)=>{
+      const tx = db.transaction(IDB_STORE,'readwrite');
+      tx.objectStore(IDB_STORE).put(val, key);
+      tx.oncomplete = ()=>resolve();
+      tx.onerror = ()=>reject(tx.error);
+    });
+  }catch(e){ console.warn('IndexedDB indisponible', e); }
+}
+async function idbGet(key){
+  try{
+    const db = await idbOpen();
+    return new Promise((resolve,reject)=>{
+      const tx = db.transaction(IDB_STORE,'readonly');
+      const req = tx.objectStore(IDB_STORE).get(key);
+      req.onsuccess = ()=>resolve(req.result || null);
+      req.onerror = ()=>reject(req.error);
+    });
+  }catch(e){ return null; }
+}
+
+/* ============================================================
+   UTILITAIRES
+   ============================================================ */
+function uid(){ return Math.random().toString(36).slice(2,10); }
+
+function frenchNumber(str){
+  if(!str) return null;
+  const n = parseFloat(String(str).replace(',','.'));
+  return isNaN(n) ? null : n;
+}
+
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(()=>t.classList.remove('show'), 2600);
+}
+
+function fieldsArray(){
+  return Object.values(state.fields).sort((a,b)=>a.name.localeCompare(b.name,'fr'));
+}
+
+/* ============================================================
+   PARSING KML (Field.kml AgOpenGPS)
+   ============================================================ */
+function parseFieldKml(text, fallbackName){
+  const doc = new DOMParser().parseFromString(text, "application/xml");
+
+  const getName = (el) => {
+    if(!el) return null;
+    let n = el.querySelector(':scope > name, :scope > n');
+    return n ? n.textContent.trim() : null;
+  };
+
+  // nom du champ : essaie le Placemark de bordure, sinon "Field Stats"
+  let fieldName = null;
+  let areaHa = null;
+  let workedHa = null;
+  let missingHa = null;
+
+  const folders = Array.from(doc.querySelectorAll('Folder'));
+  const statsFolder = folders.find(f => (getName(f)||'').toLowerCase().includes('field stats'));
+  if(statsFolder){
+    const desc = statsFolder.querySelector('description');
+    if(desc){
+      const txt = desc.textContent;
+      const m = txt.match(/Field:\s*(.+)/);
+      if(m) fieldName = m[1].trim();
+      const ha = txt.match(/Total Hectares:\s*([\d.,]+)/);
+      if(ha) areaHa = frenchNumber(ha[1]);
+      // "Worked Hectares" = surface réellement couverte par les passages,
+      // calculée par AgOpenGPS à partir des sections (Sections.txt) donc déjà
+      // nette du recroisement/overlap — c'est la valeur "réellement travaillée"
+      const wh = txt.match(/Worked Hectares:\s*([\d.,]+)/);
+      if(wh) workedHa = frenchNumber(wh[1]);
+      const mh = txt.match(/Missing Hectares:\s*(-?[\d.,]+)/);
+      if(mh) missingHa = frenchNumber(mh[1]);
+    }
+  }
+
+  const boundaryFolder = folders.find(f => (getName(f)||'').toLowerCase() === 'boundaries');
+  let boundary = [];
+  if(boundaryFolder){
+    const placemarks = Array.from(boundaryFolder.querySelectorAll('Placemark'));
+    if(!fieldName && placemarks.length){
+      fieldName = getName(placemarks[0]);
+    }
+    placemarks.forEach(pm=>{
+      const coordsEls = pm.querySelectorAll('outerBoundaryIs coordinates, Polygon coordinates');
+      coordsEls.forEach(ce=>{
+        const pts = ce.textContent.trim().split(/\s+/).map(triplet=>{
+          const [lon,lat] = triplet.split(',').map(Number);
+          return [lat,lon];
+        }).filter(p=>!isNaN(p[0]) && !isNaN(p[1]));
+        if(pts.length>2) boundary.push(pts);
+      });
+    });
+  }
+
+  if(!fieldName) fieldName = fallbackName || 'Champ sans nom';
+
+  return { name: fieldName, boundary, areaHa, workedHa, missingHa };
+}
+
+function upsertFieldFromKml(parsed, sourceLabel, origin){
+  // clé stable = nom du champ (normalisé)
+  const key = parsed.name.trim().toLowerCase();
+  let existing = Object.values(state.fields).find(f=>f.name.trim().toLowerCase()===key);
+  if(existing){
+    existing.boundary = parsed.boundary.length ? parsed.boundary : existing.boundary;
+    if(parsed.areaHa) existing.areaHa = parsed.areaHa;
+    existing.workedHa = parsed.workedHa != null ? parsed.workedHa : (existing.workedHa || null);
+    existing.missingHa = parsed.missingHa != null ? parsed.missingHa : (existing.missingHa || null);
+    existing.source = sourceLabel;
+    existing.origin = origin;
+    existing.archived = false;
+  } else {
+    const id = uid();
+    state.fields[id] = {
+      id, name: parsed.name, client: '',
+      boundary: parsed.boundary, areaHa: parsed.areaHa || null,
+      workedHa: parsed.workedHa != null ? parsed.workedHa : null,
+      missingHa: parsed.missingHa != null ? parsed.missingHa : null,
+      source: sourceLabel, origin, archived: false,
+    };
+  }
+  return key;
+}
+
+/* retire (ou marque comme retirés) les champs importés depuis le dossier qui
+   n'ont plus été vus lors du dernier scan — garde l'historique si des
+   interventions existent déjà dessus */
+function reconcileFolderFields(seenKeys){
+  let removed = 0, archived = 0;
+  Object.values(state.fields).forEach(f=>{
+    if(f.origin !== 'folder') return; // ne touche pas aux imports manuels
+    const key = f.name.trim().toLowerCase();
+    if(seenKeys.has(key)) return;
+    const hasInterventions = state.interventions.some(i=>i.fieldId===f.id);
+    if(hasInterventions){
+      if(!f.archived){ f.archived = true; archived++; }
+    } else {
+      delete state.fields[f.id];
+      removed++;
+    }
+  });
+  return {removed, archived};
+}
+
+async function importKmlFiles(fileList){
+  let count = 0;
+  for(const file of fileList){
+    try{
+      const text = await file.text();
+      const parsed = parseFieldKml(text, file.name.replace(/\.kml$/i,''));
+      upsertFieldFromKml(parsed, file.name, 'manual');
+      count++;
+    }catch(e){
+      console.error('Erreur import', file.name, e);
+    }
+  }
+  if(count){
+    toast(count+" champ(s) importé(s)");
+    renderFields();
+    refreshFieldSelects();
+    scheduleSave();
+  }
+}
+
+/* recherche récursive de Field.kml dans un dossier lié (File System Access API) */
+async function scanDirectoryForFieldKml(handle, depth, counters){
+  if(depth > 6) return;
+  let entries;
+  try{
+    entries = handle.entries();
+  }catch(e){
+    counters.errors.push(handle.name+' (accès refusé)');
+    return;
+  }
+  while(true){
+    let step;
+    try{
+      step = await entries.next();
+    }catch(e){
+      counters.errors.push(handle.name+' (lecture interrompue)');
+      break;
+    }
+    if(step.done) break;
+    const [name, entry] = step.value;
+    counters.entriesSeen++;
+    try{
+      if(entry.kind === 'file' && /^field\.kml$/i.test(name)){
+        counters.kmlSeen++;
+        const file = await entry.getFile();
+        const text = await file.text();
+        const parentLabel = handle.name ? handle.name : name;
+        const parsed = parseFieldKml(text, parentLabel);
+        const key = upsertFieldFromKml(parsed, parentLabel+'/'+name, 'folder');
+        counters.seenKeys.add(key);
+        counters.fieldsFound++;
+      } else if(entry.kind === 'directory'){
+        await scanDirectoryForFieldKml(entry, depth+1, counters);
+      }
+    }catch(e){
+      counters.errors.push((handle.name||'')+'/'+name+' : '+(e.message||e.name||'erreur inconnue'));
+    }
+  }
+}
+
+/* ============================================================
+   STOCKAGE : File System Access API + fallback JSON manuel
+   ============================================================ */
+async function pickFolder(){
+  if(!fsApiSupported){
+    toast("Ce navigateur ne supporte pas la liaison directe à un dossier — utilise l'export/import JSON.");
+    return;
+  }
+  try{
+    const handle = await window.showDirectoryPicker();
+    await idbSet('rootDir', handle);
+    await connectToDirHandle(handle);
+  }catch(e){
+    if(e.name !== 'AbortError') console.error(e);
+  }
+}
+
+async function connectToDirHandle(handle){
+  dirHandle = handle;
+  document.getElementById('connDot').className = 'conn-dot on';
+  document.getElementById('connLabel').textContent = 'Dossier lié : '+dirHandle.name;
+  document.getElementById('dataFolderName').textContent = dirHandle.name;
+  document.getElementById('reconnectBanner').style.display = 'none';
+
+  if(ghConfig){
+    // GitHub est déjà la source de vérité partagée entre appareils : on ne
+    // remplace pas l'état par le fichier local, on se contente d'assurer
+    // qu'il existe pour servir de sauvegarde passive.
+    try{
+      fileHandle = await dirHandle.getFileHandle('carnet-donnees.json');
+    }catch(e){
+      fileHandle = await dirHandle.getFileHandle('carnet-donnees.json', {create:true});
+    }
+  } else {
+    // pas de GitHub configuré : le fichier local du dossier est la seule
+    // source disponible, on le charge normalement
+    try{
+      fileHandle = await dirHandle.getFileHandle('carnet-donnees.json');
+      const file = await fileHandle.getFile();
+      const text = await file.text();
+      const loaded = JSON.parse(text);
+      state = normalizeState(loaded);
+      toast("Données chargées depuis le dossier");
+    }catch(e){
+      fileHandle = await dirHandle.getFileHandle('carnet-donnees.json', {create:true});
+      toast("Nouveau fichier de données créé dans le dossier");
+    }
+  }
+
+  await refreshFieldsFromFolder(true);
+  startFolderAutoRefresh();
+}
+
+/* re-scanne le dossier lié et met à jour la liste des champs (ajouts,
+   mises à jour, et retraits si un champ a disparu du dossier).
+   showToast=true uniquement pour le premier scan (liaison manuelle) afin de
+   ne pas notifier l'utilisateur en continu pendant les scans automatiques. */
+async function refreshFieldsFromFolder(showToast){
+  if(!dirHandle){
+    if(showToast) toast("Aucun dossier lié pour l'instant — clique sur « Lier un dossier » ou « Reconnecter le dossier » d'abord.");
+    return;
+  }
+  const counters = {entriesSeen:0, kmlSeen:0, fieldsFound:0, errors:[], seenKeys:new Set()};
+  try{
+    await scanDirectoryForFieldKml(dirHandle, 0, counters);
+  }catch(e){
+    counters.errors.push('Erreur générale : '+(e.message||e.name));
+  }
+  const {removed, archived} = reconcileFolderFields(counters.seenKeys);
+
+  renderAll();
+  scheduleSave();
+  document.getElementById('lastFolderScan').textContent = new Date().toLocaleTimeString('fr-FR');
+
+  if(showToast){
+    if(counters.fieldsFound > 0){
+      toast(counters.fieldsFound+" champ(s) trouvé(s) dans « "+dirHandle.name+" »");
+    } else if(counters.entriesSeen === 0){
+      toast("Le dossier « "+dirHandle.name+" » semble vide ou inaccessible depuis ce navigateur.");
+    } else if(counters.kmlSeen === 0){
+      toast("Aucun fichier Field.kml trouvé dans « "+dirHandle.name+" » (parcouru : "+counters.entriesSeen+" élément(s)). Vérifie que c'est bien le bon dossier.");
+    } else {
+      toast("Field.kml trouvé(s) mais non exploitable(s) — voir la console (F12) pour le détail.");
+    }
+  } else if(removed || archived){
+    let msg = [];
+    if(removed) msg.push(removed+" champ(s) retiré(s) (disparus du dossier)");
+    if(archived) msg.push(archived+" champ(s) marqué(s) comme retirés (historique conservé)");
+    toast(msg.join(' · '));
+  }
+  if(counters.errors.length){
+    console.warn('Erreurs de scan :', counters.errors);
+  }
+}
+
+let folderAutoRefreshTimer = null;
+function startFolderAutoRefresh(){
+  clearInterval(folderAutoRefreshTimer);
+  // toutes les 60 secondes tant qu'un dossier reste lié
+  folderAutoRefreshTimer = setInterval(()=>{
+    if(dirHandle) refreshFieldsFromFolder(false);
+  }, 60000);
+}
+// re-scan aussi quand l'onglet redevient visible (l'appli tourne en tâche de
+// fond entre-temps, un setInterval seul peut être mis en pause par le navigateur)
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'visible'){
+    if(dirHandle) refreshFieldsFromFolder(false);
+    if(logsDirHandle) refreshLogsFromFolder(false);
+    if(ghConfig) ghLoadNow(true);
+  }
+});
+
+/* tente de reconnecter automatiquement le dossier lié lors d'une session précédente */
+async function tryRestoreDirHandle(){
+  if(!fsApiSupported) return;
+  const handle = await idbGet('rootDir');
+  if(!handle) return;
+  try{
+    const perm = await handle.queryPermission({mode:'readwrite'});
+    if(perm === 'granted'){
+      await connectToDirHandle(handle);
+    } else {
+      // la permission doit être reconfirmée par un geste utilisateur (clic)
+      showReconnectBanner(handle);
+    }
+  }catch(e){
+    console.warn('Handle de dossier invalide, à relier manuellement', e);
+  }
+}
+
+function showReconnectBanner(handle){
+  const banner = document.getElementById('reconnectBanner');
+  banner.style.display = 'flex';
+  banner.querySelector('span').textContent = 'Dossier « '+handle.name+' » lié précédemment — reconnecte-le pour continuer.';
+  const btn = banner.querySelector('button');
+  btn.onclick = async ()=>{
+    try{
+      const perm = await handle.requestPermission({mode:'readwrite'});
+      if(perm === 'granted'){
+        await connectToDirHandle(handle);
+      } else {
+        toast("Permission refusée pour ce dossier.");
+      }
+    }catch(e){ console.error(e); toast("Impossible de reconnecter ce dossier."); }
+  };
+}
+
+function scheduleSave(){
+  document.getElementById('lastSaved').textContent = new Date().toLocaleString('fr-FR');
+  scheduleGhSave();
+  if(!fileHandle) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async ()=>{
+    try{
+      const writable = await fileHandle.createWritable();
+      await writable.write(JSON.stringify(state, null, 2));
+      await writable.close();
+    }catch(e){ console.error('Erreur sauvegarde', e); }
+  }, 500);
+}
+
+function exportJson(){
+  const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'carnet-donnees.json';
+  a.click();
+}
+
+function importJsonFile(file){
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try{
+      const loaded = JSON.parse(reader.result);
+      state = normalizeState(loaded);
+      renderAll();
+      toast("Données importées");
+    }catch(e){ toast("Fichier JSON invalide"); }
+  };
+  reader.readAsText(file);
+}
+
+/* ============================================================
+   RENDU — CHAMPS
+   ============================================================ */
+function initMap(){
+  map = L.map('map').setView([46.7, 1.7], 6);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 19,
+  }).addTo(map);
+  layerGroup = L.layerGroup().addTo(map);
+}
+
+function renderFields(){
+  const list = document.getElementById('fieldsList');
+  const fields = fieldsArray();
+  document.getElementById('countFields').textContent = fields.length || '';
+
+  if(!fields.length){
+    list.innerHTML = '<div class="empty-note">Aucun champ importé pour l\'instant. Lie ton dossier OneDrive ou importe des fichiers .kml.</div>';
+  } else {
+    list.innerHTML = fields.map(f=>{
+      const hasB = f.boundary && f.boundary.length;
+      const rowClass = f.archived ? 'no-boundary' : (hasB?'has-boundary':'no-boundary');
+      return `<div class="field-row ${rowClass}" style="${f.archived?'opacity:.55;':''}">
+        <div style="flex:1;">
+          <div class="fname">${escapeHtml(f.name)} ${f.archived ? '<span class="badge warn">retiré du dossier</span>' : ''}</div>
+          <div class="fmeta">${f.areaHa ? f.areaHa.toFixed(2).replace('.',',')+' ha' : ''}${(f.workedHa!=null) ? ' <span title="Surface réellement travaillée (AgOpenGPS, net du recroisement)">· '+f.workedHa.toFixed(2).replace('.',',')+' ha travaillés</span>' : ''}${(f.areaHa||f.workedHa!=null) ? ' · ' : ''}${hasB ? 'bordure tracée' : 'pas de bordure tracée'}</div>
+        </div>
+        <input class="client-input" data-field="${f.id}" placeholder="Client" value="${escapeHtml(f.client||'')}">
+        ${f.archived ? '' : `<button class="btn small" data-add-interv="${f.id}" title="Ajouter une intervention pour ce champ">+ Intervention</button>`}
+      </div>`;
+    }).join('');
+    list.querySelectorAll('[data-add-interv]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        goToInterventionForm(btn.dataset.addInterv);
+      });
+    });
+    list.querySelectorAll('.client-input').forEach(inp=>{
+      inp.addEventListener('change', e=>{
+        state.fields[e.target.dataset.field].client = e.target.value;
+        scheduleSave();
+        refreshFilterSelects();
+      });
+    });
+  }
+
+  // carte
+  layerGroup.clearLayers();
+  let bounds = [];
+  fields.forEach(f=>{
+    if(f.boundary && f.boundary.length){
+      f.boundary.forEach(ring=>{
+        const poly = L.polygon(ring, {color:'#a15c2e', weight:2, fillColor:'#33503a', fillOpacity:.25});
+        poly.bindTooltip(f.name);
+        poly.addTo(layerGroup);
+        bounds = bounds.concat(ring);
+      });
+    }
+  });
+  if(bounds.length){
+    map.fitBounds(bounds, {padding:[20,20]});
+  }
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function goToInterventionForm(fieldId){
+  resetInterventionForm();
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.querySelector('.tab-btn[data-view="interventions"]').classList.add('active');
+  document.getElementById('view-interventions').classList.add('active');
+  const sel = document.getElementById('fChamp');
+  sel.value = fieldId;
+  sel.dispatchEvent(new Event('change'));
+  delete document.getElementById('fPrix').dataset.userEdited;
+  document.getElementById('fType').dispatchEvent(new Event('change'));
+  document.getElementById('interventionForm').scrollIntoView({behavior:'smooth', block:'start'});
+  document.getElementById('fType').focus();
+}
+
+/* ============================================================
+   RENDU — TYPES
+   ============================================================ */
+function renderTypes(){
+  const list = document.getElementById('typeList');
+  if(!state.types.length){
+    list.innerHTML = '<div class="empty-note">Aucun type défini.</div>';
+    return;
+  }
+  list.innerHTML = state.types.map(t=>{
+    return `<div class="type-row" style="flex-wrap:wrap;">
+      <span class="tname">${escapeHtml(t.name)}</span>
+      <input type="number" step="0.01" class="price-input" data-price-for="${escapeHtml(t.name)}"
+        value="${t.price!=null ? t.price : ''}" placeholder="Prix (€)">
+      <input type="text" class="price-input" data-field1-for="${escapeHtml(t.name)}"
+        value="${escapeHtml(t.field1Label||'')}" placeholder="Libellé champ 1 (ex. Produit)" style="width:170px;">
+      <input type="text" class="price-input" data-field2-for="${escapeHtml(t.name)}"
+        value="${escapeHtml(t.field2Label||'')}" placeholder="Libellé champ 2 (ex. Dose)" style="width:170px;">
+      <button class="btn small danger" data-del-type="${escapeHtml(t.name)}">Supprimer</button>
+    </div>`;
+  }).join('');
+
+  list.querySelectorAll('[data-price-for]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      const t = getType(inp.dataset.priceFor);
+      if(t){
+        t.price = frenchNumber(inp.value);
+        scheduleSave();
+      }
+    });
+  });
+  list.querySelectorAll('[data-field1-for]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      const t = getType(inp.dataset.field1For);
+      if(t){ t.field1Label = inp.value.trim() || null; refreshTypeSelect(); scheduleSave(); }
+    });
+  });
+  list.querySelectorAll('[data-field2-for]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      const t = getType(inp.dataset.field2For);
+      if(t){ t.field2Label = inp.value.trim() || null; refreshTypeSelect(); scheduleSave(); }
+    });
+  });
+  list.querySelectorAll('[data-del-type]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const name = btn.dataset.delType;
+      const used = state.interventions.some(i=>i.type===name);
+      if(used && !confirm(`Le type « ${name} » est utilisé par des interventions déjà saisies. Le supprimer quand même de la liste ?`)) return;
+      state.types = state.types.filter(t=>t.name!==name);
+      renderTypes();
+      refreshTypeSelect();
+      scheduleSave();
+    });
+  });
+}
+
+/* ============================================================
+   RENDU — INTERVENTIONS
+   ============================================================ */
+function refreshFieldSelects(){
+  const champSel = document.getElementById('fChamp');
+  const filterField = document.getElementById('filterField');
+  const fields = fieldsArray();
+  const activeOpts = fields.filter(f=>!f.archived).map(f=>`<option value="${f.id}">${escapeHtml(f.name)}</option>`).join('');
+  const allOpts = fields.map(f=>`<option value="${f.id}">${escapeHtml(f.name)}${f.archived?' (retiré)':''}</option>`).join('');
+  champSel.innerHTML = activeOpts || '<option value="">Aucun champ</option>';
+  filterField.innerHTML = '<option value="">Tous</option>' + allOpts;
+}
+
+function refreshTypeSelect(){
+  const sel = document.getElementById('fType');
+  sel.innerHTML = state.types.map(t=>`<option value="${escapeHtml(t.name)}">${escapeHtml(t.name)}</option>`).join('');
+}
+
+function refreshFilterSelects(){
+  const clientSel = document.getElementById('filterClient');
+  const clients = Array.from(new Set(fieldsArray().map(f=>f.client).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'fr'));
+  clientSel.innerHTML = '<option value="">Tous</option>' + clients.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+}
+
+document.getElementById('fChamp').addEventListener('change', e=>{
+  const f = state.fields[e.target.value];
+  if(f){
+    const refArea = (f.workedHa != null) ? f.workedHa : f.areaHa;
+    document.getElementById('fSurface').placeholder = refArea ? refArea.toFixed(2) : 'auto';
+    document.getElementById('fClient').placeholder = f.client || 'auto (depuis le champ)';
+  }
+});
+
+function updateDynamicDetailFields(){
+  const t = getType(document.getElementById('fType').value);
+  const w1 = document.getElementById('fDetail1Wrap');
+  const w2 = document.getElementById('fDetail2Wrap');
+  if(t && t.field1Label){
+    w1.style.display = '';
+    document.getElementById('fDetail1Label').textContent = t.field1Label;
+  } else { w1.style.display = 'none'; document.getElementById('fDetail1').value=''; }
+  if(t && t.field2Label){
+    w2.style.display = '';
+    document.getElementById('fDetail2Label').textContent = t.field2Label;
+  } else { w2.style.display = 'none'; document.getElementById('fDetail2').value=''; }
+}
+
+document.getElementById('fType').addEventListener('change', e=>{
+  const t = getType(e.target.value);
+  const prixField = document.getElementById('fPrix');
+  // ne remplace le prix que s'il n'a pas déjà été saisi à la main
+  if(t && t.price != null && !prixField.dataset.userEdited){
+    prixField.value = t.price;
+  }
+  updateDynamicDetailFields();
+});
+document.getElementById('fPrix').addEventListener('input', e=>{
+  e.target.dataset.userEdited = '1';
+});
+
+let editingInterventionId = null;
+
+function resetInterventionForm(){
+  editingInterventionId = null;
+  document.getElementById('interventionForm').reset();
+  document.getElementById('fDate').value = '';
+  delete document.getElementById('fPrix').dataset.userEdited;
+  document.getElementById('interventionFormTitle').textContent = 'Nouvelle intervention';
+  document.getElementById('btnSubmitInterv').textContent = "Enregistrer l'intervention";
+  document.getElementById('btnCancelEdit').style.display = 'none';
+  updateDynamicDetailFields();
+}
+
+function startEditIntervention(id){
+  const interv = state.interventions.find(i=>i.id===id);
+  if(!interv) return;
+  editingInterventionId = id;
+  document.querySelector('.tab-btn[data-view="interventions"]').click();
+  document.getElementById('fChamp').value = interv.fieldId;
+  document.getElementById('fType').value = interv.type;
+  document.getElementById('fDate').value = interv.date || '';
+  document.getElementById('fSurface').value = interv.areaHa != null ? interv.areaHa : '';
+  document.getElementById('fClient').value = interv.client || '';
+  document.getElementById('fPrix').value = interv.price != null ? interv.price : '';
+  document.getElementById('fPrix').dataset.userEdited = '1';
+  document.getElementById('fDuree').value = interv.durationMin != null ? interv.durationMin : '';
+  document.getElementById('fDetails').value = interv.details || '';
+  document.getElementById('fNotes').value = interv.notes || '';
+  document.getElementById('fInvoiced').checked = !!interv.invoiced;
+  updateDynamicDetailFields();
+  document.getElementById('fDetail1').value = interv.detail1 || '';
+  document.getElementById('fDetail2').value = interv.detail2 || '';
+  document.getElementById('interventionFormTitle').textContent = "Modifier l'intervention";
+  document.getElementById('btnSubmitInterv').textContent = 'Mettre à jour';
+  document.getElementById('btnCancelEdit').style.display = '';
+  document.getElementById('interventionForm').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+document.getElementById('btnCancelEdit').addEventListener('click', resetInterventionForm);
+
+document.getElementById('interventionForm').addEventListener('submit', e=>{
+  e.preventDefault();
+  const fieldId = document.getElementById('fChamp').value;
+  const f = state.fields[fieldId];
+  if(!f){ toast("Sélectionne un champ"); return; }
+  const surface = frenchNumber(document.getElementById('fSurface').value) || (f.workedHa != null ? f.workedHa : f.areaHa) || null;
+  const client = document.getElementById('fClient').value.trim() || f.client || '';
+
+  const data = {
+    fieldId,
+    type: document.getElementById('fType').value,
+    date: document.getElementById('fDate').value,
+    client,
+    areaHa: surface,
+    price: frenchNumber(document.getElementById('fPrix').value),
+    durationMin: document.getElementById('fDuree').value ? Math.round(frenchNumber(document.getElementById('fDuree').value)) : null,
+    detail1: document.getElementById('fDetail1').value.trim(),
+    detail2: document.getElementById('fDetail2').value.trim(),
+    details: document.getElementById('fDetails').value.trim(),
+    notes: document.getElementById('fNotes').value.trim(),
+    invoiced: document.getElementById('fInvoiced').checked,
+  };
+
+  if(editingInterventionId){
+    const idx = state.interventions.findIndex(i=>i.id===editingInterventionId);
+    if(idx !== -1) state.interventions[idx] = {...state.interventions[idx], ...data};
+    toast("Intervention mise à jour");
+  } else {
+    state.interventions.push({id: uid(), ...data});
+    toast("Intervention enregistrée");
+  }
+
+  resetInterventionForm();
+  renderInterventions();
+  refreshFilterSelects();
+  scheduleSave();
+});
+
+function currentFilters(){
+  return {
+    client: document.getElementById('filterClient').value,
+    fieldId: document.getElementById('filterField').value,
+    from: document.getElementById('filterFrom').value,
+    to: document.getElementById('filterTo').value,
+    invoiced: document.getElementById('filterInvoiced').value,
+  };
+}
+
+function filteredInterventions(){
+  const {client, fieldId, from, to, invoiced} = currentFilters();
+  return state.interventions
+    .filter(i => !client || i.client === client)
+    .filter(i => !fieldId || i.fieldId === fieldId)
+    .filter(i => !from || i.date >= from)
+    .filter(i => !to || i.date <= to)
+    .filter(i => !invoiced || (invoiced === 'yes' ? !!i.invoiced : !i.invoiced))
+    .sort((a,b) => (b.date||'').localeCompare(a.date||''));
+}
+
+let selectedInterventions = new Set();
+
+function renderInterventions(){
+  const body = document.getElementById('interventionsBody');
+  const rows = filteredInterventions();
+  document.getElementById('countInterv').textContent = state.interventions.length || '';
+
+  // nettoyer la sélection des lignes qui ne sont plus visibles/existantes
+  const visibleIds = new Set(rows.map(r=>r.id));
+  Array.from(selectedInterventions).forEach(id=>{ if(!visibleIds.has(id)) selectedInterventions.delete(id); });
+
+  if(!rows.length){
+    body.innerHTML = `<tr><td colspan="10" class="empty-note">Aucune intervention pour ces filtres.</td></tr>`;
+  } else {
+    body.innerHTML = rows.map(i=>{
+      const f = state.fields[i.fieldId];
+      const checked = selectedInterventions.has(i.id) ? 'checked' : '';
+      const detailBits = [];
+      if(i.durationMin) detailBits.push(i.durationMin+' min');
+      if(i.detail1) detailBits.push(escapeHtml(i.detail1));
+      if(i.detail2) detailBits.push(escapeHtml(i.detail2));
+      if(i.details) detailBits.push(escapeHtml(i.details));
+      const detailText = detailBits.length ? detailBits.join(' · ') : '—';
+      return `<tr style="${i.invoiced?'opacity:.65;':''}">
+        <td><input type="checkbox" class="row-select" data-id="${i.id}" ${checked}></td>
+        <td>${i.date ? formatDateFr(i.date) : '—'}</td>
+        <td>${escapeHtml(i.client||'—')}</td>
+        <td>${escapeHtml(f ? f.name : '—')}</td>
+        <td><span class="type-pill">${escapeHtml(i.type)}</span></td>
+        <td>${i.areaHa ? i.areaHa.toFixed(2).replace('.',',') : '—'}</td>
+        <td>${formatPrice(i.price)}</td>
+        <td>${detailText}</td>
+        <td style="text-align:center;"><input type="checkbox" class="row-invoiced" data-id="${i.id}" ${i.invoiced?'checked':''} title="Marquer comme facturé"></td>
+        <td class="row-actions">
+          <button class="btn small" data-edit="${i.id}">Modifier</button>
+          <button class="btn small" data-export="${i.id}" title="Exporter uniquement cette intervention">Export</button>
+          <button class="btn small danger" data-del="${i.id}">Suppr.</button>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  body.querySelectorAll('[data-del]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!confirm("Supprimer cette intervention ?")) return;
+      state.interventions = state.interventions.filter(i=>i.id!==btn.dataset.del);
+      selectedInterventions.delete(btn.dataset.del);
+      renderInterventions();
+      scheduleSave();
+    });
+  });
+  body.querySelectorAll('[data-edit]').forEach(btn=>{
+    btn.addEventListener('click', ()=>startEditIntervention(btn.dataset.edit));
+  });
+  body.querySelectorAll('[data-export]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const interv = state.interventions.find(i=>i.id===btn.dataset.export);
+      if(interv) exportCsv([interv], 'intervention-'+(interv.date||'')+'.csv');
+    });
+  });
+  body.querySelectorAll('.row-invoiced').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      const interv = state.interventions.find(i=>i.id===cb.dataset.id);
+      if(interv){ interv.invoiced = cb.checked; scheduleSave(); renderInterventions(); }
+    });
+  });
+  body.querySelectorAll('.row-select').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      if(cb.checked) selectedInterventions.add(cb.dataset.id);
+      else selectedInterventions.delete(cb.dataset.id);
+      updateSelectionUI(rows);
+    });
+  });
+
+  renderClientSummary(rows);
+  updateSelectionUI(rows);
+}
+
+function renderClientSummary(rows){
+  const body = document.getElementById('clientSummaryBody');
+  if(!body) return;
+  const byClient = {};
+  rows.forEach(i=>{
+    const key = i.client || '(sans client)';
+    if(!byClient[key]) byClient[key] = {count:0, area:0, invoiced:0, notInvoiced:0};
+    const g = byClient[key];
+    g.count++;
+    if(i.areaHa) g.area += i.areaHa;
+    const price = typeof i.price === 'number' ? i.price : 0;
+    if(i.invoiced) g.invoiced += price; else g.notInvoiced += price;
+  });
+  const clients = Object.keys(byClient).sort((a,b)=>a.localeCompare(b,'fr'));
+  if(!clients.length){
+    body.innerHTML = `<tr><td colspan="6" class="empty-note">Aucune donnée pour ces filtres.</td></tr>`;
+    return;
+  }
+  body.innerHTML = clients.map(c=>{
+    const g = byClient[c];
+    const total = g.invoiced + g.notInvoiced;
+    return `<tr>
+      <td>${escapeHtml(c)}</td>
+      <td>${g.count}</td>
+      <td>${g.area.toFixed(2).replace('.',',')}</td>
+      <td>${formatPrice(g.invoiced, true)}</td>
+      <td>${formatPrice(g.notInvoiced, true)}</td>
+      <td><strong>${formatPrice(total, true)}</strong></td>
+    </tr>`;
+  }).join('');
+}
+
+function updateSelectionUI(rows){
+  const count = selectedInterventions.size;
+  document.getElementById('selectionCount').textContent = count+' sélectionnée(s)';
+  document.getElementById('btnExportSelection').disabled = count === 0;
+  document.getElementById('btnExportPdf').disabled = count === 0;
+  const total = rows.reduce((sum,i)=> sum + (typeof i.price==='number' ? i.price : 0), 0);
+  document.getElementById('totalPrix').textContent = formatPrice(total, true);
+  const selectAll = document.getElementById('selectAllRows');
+  selectAll.checked = rows.length>0 && count === rows.length;
+}
+
+function formatPrice(v, forceZero){
+  if(typeof v !== 'number' || isNaN(v)){
+    return forceZero ? '0,00 €' : '—';
+  }
+  return v.toFixed(2).replace('.',',')+' €';
+}
+
+document.getElementById('selectAllRows').addEventListener('change', e=>{
+  const rows = filteredInterventions();
+  if(e.target.checked) rows.forEach(r=>selectedInterventions.add(r.id));
+  else rows.forEach(r=>selectedInterventions.delete(r.id));
+  renderInterventions();
+});
+
+function formatDateFr(iso){
+  const [y,m,d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+['filterClient','filterField','filterFrom','filterTo','filterInvoiced'].forEach(id=>{
+  document.getElementById(id).addEventListener('change', renderInterventions);
+});
+
+/* ============================================================
+   EXPORT CSV
+   ============================================================ */
+function exportCsv(rows, filename){
+  rows = rows || filteredInterventions();
+  if(!rows.length){ toast("Aucune intervention à exporter"); return; }
+  const header = ['Date','Client','Champ','Type','Surface (ha)','Prix (€)','Durée (min)','Détail 1','Détail 2','Détails','Remarques','Facturé'];
+  const lines = [header.join(';')];
+  let total = 0;
+  rows.forEach(i=>{
+    const f = state.fields[i.fieldId];
+    if(typeof i.price === 'number') total += i.price;
+    const line = [
+      i.date ? formatDateFr(i.date) : '',
+      i.client||'',
+      f ? f.name : '',
+      i.type,
+      i.areaHa ? String(i.areaHa).replace('.',',') : '',
+      typeof i.price === 'number' ? String(i.price).replace('.',',') : '',
+      i.durationMin || '',
+      (i.detail1||'').replace(/;/g,','),
+      (i.detail2||'').replace(/;/g,','),
+      (i.details||'').replace(/;/g,','),
+      (i.notes||'').replace(/;/g,','),
+      i.invoiced ? 'Oui' : 'Non',
+    ];
+    lines.push(line.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(';'));
+  });
+  lines.push(['','','','','Total',String(total.toFixed(2)).replace('.',','),'','','','','',''].map(v=>`"${v}"`).join(';'));
+  const blob = new Blob(["\uFEFF"+lines.join('\r\n')], {type:'text/csv;charset=utf-8;'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename || 'interventions-export.csv';
+  a.click();
+}
+
+/* ============================================================
+   NAVIGATION ONGLETS
+   ============================================================ */
+document.querySelectorAll('.tab-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('view-'+btn.dataset.view).classList.add('active');
+    if(btn.dataset.view === 'champs' && map){ setTimeout(()=>map.invalidateSize(), 50); }
+  });
+});
+
+/* ============================================================
+   RENDU GLOBAL
+   ============================================================ */
+function renderAll(){
+  renderFields();
+  refreshFieldSelects();
+  refreshTypeSelect();
+  refreshFilterSelects();
+  renderTypes();
+  renderInterventions();
+  renderCompanyInfo();
+  hydrateLogSessionsFromState();
+}
+
+function hydrateLogSessionsFromState(){
+  logSessions = (state.logSessions||[]).map(s=>({
+    fieldName: s.fieldName, start: new Date(s.start), end: new Date(s.end), durationMin: s.durationMin, vehicle: s.vehicle||null,
+  }));
+  renderLogSessions();
+}
+
+function renderCompanyInfo(){
+  const ci = state.companyInfo || {};
+  document.getElementById('companyName').value = ci.name || '';
+  document.getElementById('companyAddress').value = ci.address || '';
+  document.getElementById('companySiret').value = ci.siret || '';
+  document.getElementById('companyRcsCity').value = ci.rcsCity || '';
+  document.getElementById('companyPaymentDays').value = ci.paymentDays != null ? ci.paymentDays : 30;
+  document.getElementById('companyVatSubject').checked = ci.vatSubject !== false;
+  document.getElementById('companyVatRate').value = ci.vatRate != null ? ci.vatRate : 20;
+  document.getElementById('companyVatNumber').value = ci.vatNumber || '';
+  document.getElementById('companyNextInvoiceNumber').value = ci.nextInvoiceNumber || 1;
+}
+
+/* ============================================================
+   ÉVÉNEMENTS UI
+   ============================================================ */
+document.getElementById('btnPickFolder').addEventListener('click', pickFolder);
+document.getElementById('btnPickLogsFolder').addEventListener('click', pickLogsFolder);
+document.getElementById('btnRefreshFolder').addEventListener('click', ()=>refreshFieldsFromFolder(true));
+document.getElementById('btnGoToGithub').addEventListener('click', ()=>{
+  document.querySelector('.tab-btn[data-view="donnees"]').click();
+  document.getElementById('ghRepo').scrollIntoView({behavior:'smooth', block:'center'});
+});
+document.getElementById('btnGhConnect').addEventListener('click', connectGithub);
+document.getElementById('btnGhReload').addEventListener('click', ()=>ghLoadNow(false));
+document.getElementById('btnGhDisconnect').addEventListener('click', disconnectGithub);
+document.getElementById('btnToggleGhToken').addEventListener('click', ()=>{
+  const inp = document.getElementById('ghToken');
+  const btn = document.getElementById('btnToggleGhToken');
+  if(inp.type === 'password'){ inp.type = 'text'; btn.textContent = 'Masquer'; }
+  else { inp.type = 'password'; btn.textContent = 'Afficher'; }
+});
+
+document.getElementById('btnImportKmlManual').addEventListener('click', ()=>{
+  document.getElementById('fileKmlInput').click();
+});
+document.getElementById('fileKmlInput').addEventListener('change', e=>{
+  if(e.target.files.length) importKmlFiles(Array.from(e.target.files));
+  e.target.value = '';
+});
+
+document.getElementById('btnImportLogs').addEventListener('click', ()=>{
+  document.getElementById('fileLogsInput').click();
+});
+document.getElementById('fileLogsInput').addEventListener('change', e=>{
+  if(e.target.files.length) importLogFiles(Array.from(e.target.files));
+  e.target.value = '';
+});
+document.getElementById('minSessionDuration').addEventListener('change', renderLogSessions);
+document.getElementById('logSessionSearch').addEventListener('input', renderLogSessions);
+
+document.getElementById('btnAddType').addEventListener('click', ()=>{
+  const inp = document.getElementById('newTypeInput');
+  const priceInp = document.getElementById('newTypePrice');
+  const f1Inp = document.getElementById('newTypeField1');
+  const f2Inp = document.getElementById('newTypeField2');
+  const val = inp.value.trim();
+  if(!val) return;
+  if(state.types.some(t=>t.name.toLowerCase()===val.toLowerCase())){ toast("Ce type existe déjà"); return; }
+  state.types.push({
+    name: val, price: frenchNumber(priceInp.value),
+    field1Label: f1Inp.value.trim() || null, field2Label: f2Inp.value.trim() || null,
+  });
+  inp.value = ''; priceInp.value = ''; f1Inp.value = ''; f2Inp.value = '';
+  renderTypes();
+  refreshTypeSelect();
+  scheduleSave();
+});
+document.getElementById('newTypeInput').addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ e.preventDefault(); document.getElementById('btnAddType').click(); }
+});
+
+document.getElementById('btnExportJson').addEventListener('click', exportJson);
+document.getElementById('btnImportJson').addEventListener('click', ()=>document.getElementById('jsonInput').click());
+document.getElementById('jsonInput').addEventListener('change', e=>{
+  if(e.target.files.length) importJsonFile(e.target.files[0]);
+  e.target.value = '';
+});
+document.getElementById('btnExportCsv').addEventListener('click', ()=>exportCsv());
+document.getElementById('btnExportSelection').addEventListener('click', ()=>{
+  const rows = state.interventions.filter(i=>selectedInterventions.has(i.id));
+  exportCsv(rows, 'interventions-selection.csv');
+});
+document.getElementById('btnExportPdf').addEventListener('click', ()=>{
+  const rows = state.interventions.filter(i=>selectedInterventions.has(i.id));
+  generateInvoicePdf(rows);
+});
+
+['companyName','companyAddress','companySiret','companyRcsCity','companyPaymentDays','companyVatSubject','companyVatRate','companyVatNumber','companyNextInvoiceNumber'].forEach(id=>{
+  document.getElementById(id).addEventListener('change', ()=>{
+    state.companyInfo = {
+      name: document.getElementById('companyName').value.trim(),
+      address: document.getElementById('companyAddress').value.trim(),
+      siret: document.getElementById('companySiret').value.trim(),
+      rcsCity: document.getElementById('companyRcsCity').value.trim(),
+      paymentDays: Number(document.getElementById('companyPaymentDays').value) || 30,
+      vatSubject: document.getElementById('companyVatSubject').checked,
+      vatRate: frenchNumber(document.getElementById('companyVatRate').value) || 0,
+      vatNumber: document.getElementById('companyVatNumber').value.trim(),
+      nextInvoiceNumber: Number(document.getElementById('companyNextInvoiceNumber').value) || 1,
+    };
+    scheduleSave();
+  });
+});
+
+/* ============================================================
+   TEMPS PASSÉ — analyse des journaux d'événements AgOpenGPS
+   ============================================================ */
+const AOG_MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const AOG_WEEKDAYS = "Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday";
+// ex: "** Opened **  Svo route 2020.Mar.23 16_33   Tuesday, 12 August 2025 17:52"
+const AOG_LOG_LINE_RE = new RegExp(
+  "\\*\\*\\s*(Field closed|Closed|Opened)\\s*\\*\\*\\s+(.+?)\\s{2,}(?:"+AOG_WEEKDAYS+"),\\s*(\\d{1,2})\\s+(\\w+)\\s+(\\d{4})\\s+(\\d{1,2}):(\\d{2})"
+);
+// ex: "Profile loaded: T7210 nordsten.xml" / "Vehicle Loaded: T7210 ZA-TS.XML"
+// / "Registry -> Key VehicleFileName Saved to registry key with value: T7250 carrier"
+const AOG_VEHICLE_RE = /(?:Profile loaded|Vehicle [Ll]oaded|VehicleFileName Saved to registry key with value)\s*:\s*(.+)$/i;
+// ex: "15:15:05-> Program Started: Monday, 19 May 2025 15:15" — ancre de date fiable,
+// car la plupart des lignes du journal n'ont qu'un horodatage HH:MM:SS sans date
+const AOG_PROGRAM_START_RE = new RegExp(
+  "Program Started:\\s*(?:"+AOG_WEEKDAYS+"),\\s*(\\d{1,2})\\s+(\\w+)\\s+(\\d{4})"
+);
+// horodatage en tête de ligne, ex: "09:16:31-> ..."
+const AOG_LINE_TIME_RE = /^(\d{1,2}):(\d{2}):(\d{2})\s*->/;
+
+let logSessions = []; // {fieldName, start:Date, end:Date, durationMin, vehicle}
+let logsDirHandle = null;
+let logsAutoRefreshTimer = null;
+
+async function pickLogsFolder(){
+  if(!fsApiSupported){
+    toast("Ce navigateur ne supporte pas la liaison directe à un dossier — utilise l'import manuel.");
+    return;
+  }
+  try{
+    const handle = await window.showDirectoryPicker();
+    await idbSet('logsDir', handle);
+    await connectLogsDirHandle(handle);
+  }catch(e){
+    if(e.name !== 'AbortError') console.error(e);
+  }
+}
+
+async function connectLogsDirHandle(handle){
+  logsDirHandle = handle;
+  document.getElementById('logsConnDot').className = 'conn-dot on';
+  document.getElementById('logsConnLabel').textContent = 'Dossier lié : '+handle.name;
+  await refreshLogsFromFolder(true);
+  clearInterval(logsAutoRefreshTimer);
+  logsAutoRefreshTimer = setInterval(()=>{
+    if(logsDirHandle) refreshLogsFromFolder(false);
+  }, 60000);
+}
+
+async function tryRestoreLogsDirHandle(){
+  if(!fsApiSupported) return;
+  const handle = await idbGet('logsDir');
+  if(!handle) return;
+  try{
+    const perm = await handle.queryPermission({mode:'read'});
+    if(perm === 'granted'){
+      await connectLogsDirHandle(handle);
+    } else {
+      const dot = document.getElementById('logsConnDot');
+      const label = document.getElementById('logsConnLabel');
+      const btn = document.getElementById('btnPickLogsFolder');
+      label.textContent = 'Dossier « '+handle.name+' » lié précédemment — clique pour reconnecter';
+      btn.textContent = 'Reconnecter';
+      btn.onclick = async ()=>{
+        try{
+          const perm2 = await handle.requestPermission({mode:'read'});
+          if(perm2 === 'granted') await connectLogsDirHandle(handle);
+        }catch(e){ console.error(e); }
+      };
+    }
+  }catch(e){
+    console.warn('Handle du dossier Logs invalide', e);
+  }
+}
+
+/* scanne (non récursivement, à plat) le dossier Logs lié pour trouver les
+   fichiers AgOpenGPS_Events_Log*.txt, les analyse, et pousse les sessions
+   calculées dans l'état partagé (donc synchronisées via GitHub). */
+async function refreshLogsFromFolder(showToast){
+  if(!logsDirHandle) return;
+  let allEvents = [];
+  let filesRead = 0;
+  try{
+    for await (const [name, entry] of logsDirHandle.entries()){
+      if(entry.kind === 'file' && /agopengps_events_log.*\.txt$/i.test(name)){
+        try{
+          const file = await entry.getFile();
+          const text = await file.text();
+          allEvents = allEvents.concat(parseAgLogText(text));
+          filesRead++;
+        }catch(e){ console.error('Erreur lecture', name, e); }
+      }
+    }
+  }catch(e){
+    console.error('Erreur scan dossier Logs', e);
+    if(showToast) toast("Impossible de lire le dossier Logs.");
+    return;
+  }
+  if(!filesRead){
+    if(showToast) toast("Aucun fichier AgOpenGPS_Events_Log*.txt trouvé dans ce dossier.");
+    return;
+  }
+  const sessions = computeSessionsFromEvents(allEvents);
+  logSessions = sessions;
+  state.logSessions = sessions.map(s=>({fieldName:s.fieldName, start:s.start.toISOString(), end:s.end.toISOString(), durationMin:s.durationMin, vehicle:s.vehicle||null}));
+  renderLogSessions();
+  scheduleSave();
+  if(showToast) toast(sessions.length+" session(s) détectée(s) dans "+filesRead+" fichier(s)");
+}
+
+
+function parseAgLogDate(day, monthName, year, hour, minute){
+  const m = AOG_MONTHS.indexOf(monthName);
+  if(m === -1) return null;
+  return new Date(Number(year), m, Number(day), Number(hour), Number(minute));
+}
+
+/* Le véhicule/outil chargé n'est journalisé qu'au moment où on le change
+   (une ligne "Profile loaded" / "Vehicle Loaded" / registre), pas à chaque
+   ouverture de champ, et les fichiers AgOpenGPS_Events_Log sont découpés en
+   dizaines de rotations : un fichier donné peut très bien ne contenir aucune
+   ligne de changement d'outil tout en contenant des dizaines d'ouvertures de
+   champ. Il faut donc suivre "le dernier véhicule chargé" de façon globale et
+   chronologique, à travers TOUS les fichiers fusionnés — pas fichier par
+   fichier. Pour ça, chaque ligne "véhicule" est émise ici comme un événement
+   daté ({type:'vehicle', ...}), et c'est computeSessionsFromEvents() qui,
+   une fois tous les événements de tous les fichiers triés par date réelle,
+   fait avancer le véhicule courant au fil du temps.
+   La plupart des lignes du journal n'ont qu'un horodatage HH:MM:SS sans date
+   complète : on ancre la date courante sur les lignes "Program Started" et
+   "Opened/Closed" (qui portent une date complète), et on la fait avancer d'un
+   jour si une ligne ultérieure semble reculer dans le temps (passage de
+   minuit sans redémarrage du programme). */
+function parseAgLogText(text){
+  const events = [];
+  const lines = text.split(/\r\n|\r|\n/);
+  let anchorY=null, anchorM=null, anchorD=null;
+  let lastTimestamp = null;
+
+  function resolveTimestamp(hh, mm, ss){
+    if(anchorY==null) return null;
+    let dt = new Date(anchorY, anchorM, anchorD, Number(hh), Number(mm), Number(ss||0));
+    if(lastTimestamp && dt < new Date(lastTimestamp.getTime() - 2*3600*1000)){
+      dt = new Date(dt.getTime() + 24*3600*1000);
+    }
+    return dt;
+  }
+
+  lines.forEach(line=>{
+    const tMatch = line.match(AOG_LINE_TIME_RE);
+
+    const pMatch = line.match(AOG_PROGRAM_START_RE);
+    if(pMatch){
+      const [, day, monthName, year] = pMatch;
+      const mi = AOG_MONTHS.indexOf(monthName);
+      if(mi !== -1){ anchorY = Number(year); anchorM = mi; anchorD = Number(day); }
+    }
+
+    const vMatch = line.match(AOG_VEHICLE_RE);
+    if(vMatch && tMatch){
+      const dt = resolveTimestamp(tMatch[1], tMatch[2], tMatch[3]);
+      if(dt){
+        events.push({type:'vehicle', vehicle: vMatch[1].trim().replace(/\.(xml)$/i, ''), date: dt});
+        lastTimestamp = dt;
+      }
+    }
+
+    const m = line.match(AOG_LOG_LINE_RE);
+    if(m){
+      const [, kind, fieldName, day, monthName, year, hour, minute] = m;
+      const dt = parseAgLogDate(day, monthName, year, hour, minute);
+      if(dt){
+        anchorY = dt.getFullYear(); anchorM = dt.getMonth(); anchorD = dt.getDate();
+        events.push({
+          type: /opened/i.test(kind) ? 'open' : 'close',
+          fieldName: fieldName.trim(),
+          date: dt,
+        });
+        lastTimestamp = dt;
+      }
+    } else if(tMatch && !vMatch){
+      const dt = resolveTimestamp(tMatch[1], tMatch[2], tMatch[3]);
+      if(dt) lastTimestamp = dt;
+    }
+  });
+  return events;
+}
+
+function computeSessionsFromEvents(allEvents){
+  allEvents.sort((a,b)=> a.date - b.date);
+  const openTimes = {}; // fieldName (lowercase) -> Date d'ouverture en cours
+  const sessions = [];
+  let currentVehicle = null;
+  allEvents.forEach(ev=>{
+    if(ev.type === 'vehicle'){
+      currentVehicle = ev.vehicle;
+      return;
+    }
+    const key = ev.fieldName.toLowerCase();
+    if(ev.type === 'open'){
+      openTimes[key] = {name: ev.fieldName, date: ev.date, vehicle: currentVehicle};
+    } else {
+      const open = openTimes[key];
+      if(open){
+        const durationMin = Math.round((ev.date - open.date) / 60000);
+        if(durationMin > 0){
+          sessions.push({
+            fieldName: open.name,
+            start: open.date,
+            end: ev.date,
+            durationMin,
+            vehicle: open.vehicle || currentVehicle || null,
+          });
+        }
+        delete openTimes[key];
+      }
+    }
+  });
+  sessions.sort((a,b)=> b.start - a.start);
+  return sessions;
+}
+
+async function importLogFiles(fileList){
+  let allEvents = [];
+  for(const file of fileList){
+    try{
+      const text = await file.text();
+      allEvents = allEvents.concat(parseAgLogText(text));
+    }catch(e){ console.error('Erreur lecture log', file.name, e); }
+  }
+  if(!allEvents.length){
+    toast("Aucun événement Opened/Closed trouvé dans ces fichiers.");
+    return;
+  }
+  const sessions = computeSessionsFromEvents(allEvents);
+  logSessions = sessions;
+  state.logSessions = sessions.map(s=>({fieldName:s.fieldName, start:s.start.toISOString(), end:s.end.toISOString(), durationMin:s.durationMin, vehicle:s.vehicle||null}));
+  renderLogSessions();
+  scheduleSave();
+  toast(sessions.length+" session(s) détectée(s) dans "+fileList.length+" fichier(s)");
+}
+
+function renderLogSessions(){
+  const minDur = Number(document.getElementById('minSessionDuration').value);
+  const search = document.getElementById('logSessionSearch').value.trim().toLowerCase();
+  const rows = logSessions
+    .filter(s=>s.durationMin >= minDur)
+    .filter(s=>!search || s.fieldName.toLowerCase().includes(search));
+  const table = document.getElementById('logsSessionsTable');
+  const emptyNote = document.getElementById('logsEmptyNote');
+  const body = document.getElementById('logsSessionsBody');
+
+  if(!logSessions.length){
+    table.style.display = 'none';
+    emptyNote.style.display = '';
+    emptyNote.textContent = "Importe des journaux pour voir les sessions détectées.";
+    return;
+  }
+  if(!rows.length){
+    table.style.display = 'none';
+    emptyNote.style.display = '';
+    emptyNote.textContent = "Aucune session ne correspond aux filtres (durée minimum / recherche).";
+    return;
+  }
+  table.style.display = '';
+  emptyNote.style.display = 'none';
+
+  const fmtTime = d => d.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+  const fmtDate = d => d.toLocaleDateString('fr-FR');
+  const fmtDur = min => min >= 60 ? (Math.floor(min/60)+'h'+String(min%60).padStart(2,'0')) : min+' min';
+
+  body.innerHTML = rows.map((s,idx)=>{
+    return `<tr>
+      <td>${fmtDate(s.start)}</td>
+      <td>${escapeHtml(s.fieldName)}</td>
+      <td>${escapeHtml(s.vehicle||'—')}</td>
+      <td>${fmtTime(s.start)}</td>
+      <td>${fmtTime(s.end)}</td>
+      <td>${fmtDur(s.durationMin)}</td>
+      <td><button class="btn small" data-session-idx="${idx}">+ Intervention</button></td>
+    </tr>`;
+  }).join('');
+
+  body.querySelectorAll('[data-session-idx]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const s = rows[Number(btn.dataset.sessionIdx)];
+      prefillInterventionFromSession(s);
+    });
+  });
+}
+
+function prefillInterventionFromSession(session){
+  resetInterventionForm();
+  document.querySelector('.tab-btn[data-view="interventions"]').click();
+
+  const key = session.fieldName.trim().toLowerCase();
+  const match = Object.values(state.fields).find(f=>f.name.trim().toLowerCase() === key);
+  if(match){
+    document.getElementById('fChamp').value = match.id;
+    document.getElementById('fChamp').dispatchEvent(new Event('change'));
+  } else {
+    toast("Champ « "+session.fieldName+" » non trouvé dans l'appli — sélectionne-le manuellement.");
+  }
+  const iso = session.start.toISOString().slice(0,10);
+  document.getElementById('fDate').value = iso;
+  document.getElementById('fDuree').value = session.durationMin;
+  if(session.vehicle) document.getElementById('fNotes').value = 'Véhicule/outil : '+session.vehicle;
+  document.getElementById('interventionForm').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function generateInvoicePdf(rows){
+  if(!rows.length){ toast("Sélectionne au moins une intervention à facturer"); return; }
+  if(typeof window.jspdf === 'undefined'){ toast("Le générateur de PDF n'a pas pu se charger (vérifie la connexion réseau)."); return; }
+  const { jsPDF } = window.jspdf;
+  const ci = Object.assign({...DEFAULT_COMPANY_INFO}, state.companyInfo||{});
+  const vatRate = ci.vatSubject ? (ci.vatRate || 0) : 0;
+  const paymentDays = ci.paymentDays || 30;
+  const emissionDate = new Date();
+  const dueDate = new Date(emissionDate.getTime() + paymentDays*86400000);
+
+  // regroupe par client : une section par client, sur une nouvelle page si plusieurs,
+  // chacune avec son propre numéro de facture séquentiel
+  const byClient = {};
+  rows.forEach(i=>{
+    const key = i.client || '(sans client)';
+    if(!byClient[key]) byClient[key] = [];
+    byClient[key].push(i);
+  });
+  const clients = Object.keys(byClient).sort((a,b)=>a.localeCompare(b,'fr'));
+
+  let invoiceNumber = ci.nextInvoiceNumber || 1;
+  const year = emissionDate.getFullYear();
+
+  const doc = new jsPDF();
+  clients.forEach((client, idx)=>{
+    if(idx > 0) doc.addPage();
+    const clientRows = byClient[client].slice().sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+    const numeroFacture = year+'-'+String(invoiceNumber).padStart(4,'0');
+    invoiceNumber++;
+
+    doc.setFontSize(16);
+    doc.text(ci.name || 'Facture', 14, 18);
+    doc.setFontSize(9);
+    doc.setTextColor(100);
+    let y = 24;
+    if(ci.address){ doc.text(ci.address, 14, y); y += 5; }
+    let idLine = [];
+    if(ci.siret) idLine.push('SIRET : '+ci.siret);
+    if(ci.rcsCity) idLine.push('RCS '+ci.rcsCity);
+    if(idLine.length){ doc.text(idLine.join(' — '), 14, y); y += 5; }
+    if(ci.vatSubject && ci.vatNumber){ doc.text('N° TVA : '+ci.vatNumber, 14, y); y += 5; }
+
+    doc.setTextColor(20);
+    doc.setFontSize(12);
+    doc.text('Facture n° '+numeroFacture+' — '+client, 14, y+6);
+    doc.setFontSize(9);
+    doc.setTextColor(100);
+    doc.text("Date d'émission : "+emissionDate.toLocaleDateString('fr-FR')+'   ·   Échéance : '+dueDate.toLocaleDateString('fr-FR')+' ('+paymentDays+' jours)', 14, y+11);
+
+    const body = clientRows.map(i=>{
+      const f = state.fields[i.fieldId];
+      const detailBits = [];
+      if(i.detail1) detailBits.push(i.detail1);
+      if(i.detail2) detailBits.push(i.detail2);
+      if(i.details) detailBits.push(i.details);
+      const hasPrice = typeof i.price === 'number';
+      const unitPrice = (hasPrice && i.areaHa) ? i.price / i.areaHa : (hasPrice ? i.price : null);
+      const unitLabel = i.areaHa ? '/ha' : '(forfait)';
+      return [
+        i.date ? formatDateFr(i.date) : '—',
+        f ? f.name : '—',
+        i.type,
+        i.areaHa ? i.areaHa.toFixed(2).replace('.',',')+' ha' : '—',
+        detailBits.join(' · ') || '—',
+        unitPrice != null ? formatPrice(unitPrice, true)+' '+unitLabel : '—',
+        formatPrice(i.price, true),
+      ];
+    });
+    const totalHT = clientRows.reduce((s,i)=> s + (typeof i.price==='number'?i.price:0), 0);
+    const totalTVA = totalHT * vatRate / 100;
+    const totalTTC = totalHT + totalTVA;
+
+    doc.autoTable({
+      startY: y + 16,
+      head: [['Date','Champ','Type','Surface','Détails','P.U. HT','Montant HT']],
+      body,
+      styles: {fontSize:8, cellPadding:2},
+      headStyles: {fillColor:[51,80,58]},
+      columnStyles: {
+        3: {cellWidth:18},
+        4: {cellWidth:'auto'},
+        5: {cellWidth:24},
+        6: {cellWidth:24},
+      },
+    });
+
+    let ty = doc.lastAutoTable.finalY + 6;
+    doc.setFontSize(9);
+    doc.setTextColor(20);
+    doc.text('Total HT', 140, ty, {align:'left'});
+    doc.text(formatPrice(totalHT, true), 196, ty, {align:'right'});
+    ty += 5;
+    if(ci.vatSubject){
+      doc.text('TVA ('+String(vatRate).replace('.',',')+' %)', 140, ty, {align:'left'});
+      doc.text(formatPrice(totalTVA, true), 196, ty, {align:'right'});
+      ty += 5;
+    } else {
+      doc.setFontSize(7.5);
+      doc.text('TVA non applicable, art. 293 B du CGI', 140, ty, {align:'left'});
+      doc.setFontSize(9);
+      ty += 5;
+    }
+    doc.setFontSize(10);
+    doc.text('Total TTC', 140, ty, {align:'left'});
+    doc.text(formatPrice(totalTTC, true), 196, ty, {align:'right'});
+    ty += 10;
+
+    doc.setFontSize(7.5);
+    doc.setTextColor(110);
+    const mentions = [
+      "En cas de retard de paiement, une pénalité au taux d'intérêt légal en vigueur sera appliquée, ainsi qu'une indemnité",
+      "forfaitaire pour frais de recouvrement de 40 €, conformément aux articles L441-10 et D441-5 du Code de commerce.",
+      "Pas d'escompte pour paiement anticipé.",
+    ];
+    mentions.forEach(line=>{ doc.text(line, 14, ty); ty += 4; });
+  });
+
+  ci.nextInvoiceNumber = invoiceNumber;
+  state.companyInfo = ci;
+  renderCompanyInfo();
+  scheduleSave();
+
+  const filename = clients.length === 1
+    ? 'facture-'+clients[0].replace(/[^a-z0-9]+/gi,'-')+'.pdf'
+    : 'factures-'+new Date().toISOString().slice(0,10)+'.pdf';
+  doc.save(filename);
+}
+
+/* ============================================================
+   INITIALISATION
+   ============================================================ */
+if(!fsApiSupported){
+  document.getElementById('fsApiWarning').style.display = 'block';
+  document.getElementById('btnPickFolder').disabled = true;
+  document.getElementById('btnPickFolder').title = "Non supporté par ce navigateur";
+}
+
+initMap();
+renderAll();
+document.getElementById('fDate').valueAsDate = new Date();
+(async function initConnections(){
+  await tryRestoreGithub();
+  await tryRestoreDirHandle();
+  await tryRestoreLogsDirHandle();
+})();
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('sw.js').catch(e=>console.warn('Service worker non enregistré', e));
+  });
+}
+
+document.getElementById('currentOrigin').textContent = location.origin === 'null' ? 'file:// (page ouverte directement)' : location.origin;
+if(location.protocol === 'file:'){
+  const warn = document.getElementById('fsApiWarning');
+  warn.style.display = 'block';
+  warn.textContent = "Cette page est ouverte directement depuis un fichier : la liaison au dossier risque de ne pas être mémorisée d'une session à l'autre. Lance plutôt Lancer-Carnet-de-Champs.bat pour une liaison stable.";
+}
+</script>
+</body>
+</html>
