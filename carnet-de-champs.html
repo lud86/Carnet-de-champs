@@ -257,7 +257,7 @@
         <span id="odLabel">GitHub non connecté</span>
         <button class="btn ghost small" id="btnGoToGithub">Connexion GitHub</button>
       </div>
-      <span style="font-size:10px;color:#8a9280;">v2026-10-18-1</span>
+      <span style="font-size:10px;color:#8a9280;">v2026-10-19-1</span>
     </div>
   </header>
 
@@ -2020,7 +2020,10 @@ const AOG_LOG_LINE_RE = new RegExp(
 );
 // ex: "Profile loaded: T7210 nordsten.xml" / "Vehicle Loaded: T7210 ZA-TS.XML"
 // / "Registry -> Key VehicleFileName Saved to registry key with value: T7250 carrier"
-const AOG_VEHICLE_RE = /(?:Profile loaded|Vehicle [Ll]oaded|VehicleFileName Saved to registry key with value)\s*:\s*(.+)$/i;
+// À partir d'AgOpenGPS 6.8.6, ces lignes ont été renommées "Tool loaded" /
+// "ToolProfileName" (au lieu de "Vehicle"/"Profile") : il faut reconnaître
+// les deux formats, ancien et nouveau.
+const AOG_VEHICLE_RE = /(?:Profile loaded|Vehicle [Ll]oaded|Tool [Ll]oaded|VehicleFileName Saved to registry key with value|ToolProfileName Saved to registry key with value)\s*:\s*(.+)$/i;
 // ex: "15:15:05-> Program Started: Monday, 19 May 2025 15:15" — ancre de date fiable,
 // car la plupart des lignes du journal n'ont qu'un horodatage HH:MM:SS sans date
 const AOG_PROGRAM_START_RE = new RegExp(
