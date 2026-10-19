@@ -257,7 +257,7 @@
         <span id="odLabel">GitHub non connecté</span>
         <button class="btn ghost small" id="btnGoToGithub">Connexion GitHub</button>
       </div>
-      <span style="font-size:10px;color:#8a9280;">v2026-10-19-2</span>
+      <span style="font-size:10px;color:#8a9280;">v2026-10-19-3</span>
     </div>
   </header>
 
@@ -2092,7 +2092,7 @@ async function tryRestoreLogsDirHandle(){
    calculées dans l'état partagé (donc synchronisées via GitHub). */
 async function refreshLogsFromFolder(showToast){
   if(!logsDirHandle) return;
-  let allEvents = [];
+  let fileGroups = [];
   let filesRead = 0;
   try{
     for await (const [name, entry] of logsDirHandle.entries()){
@@ -2100,7 +2100,8 @@ async function refreshLogsFromFolder(showToast){
         try{
           const file = await entry.getFile();
           const text = await file.text();
-          allEvents = allEvents.concat(parseAgLogText(text, deviceIdFromLogFilename(name)));
+          const deviceId = deviceIdFromLogFilename(name);
+          fileGroups.push({device: deviceId, events: parseAgLogText(text, deviceId)});
           filesRead++;
         }catch(e){ console.error('Erreur lecture', name, e); }
       }
@@ -2114,6 +2115,8 @@ async function refreshLogsFromFolder(showToast){
     if(showToast) toast("Aucun fichier AgOpenGPS_Events_Log*.txt trouvé dans ce dossier.");
     return;
   }
+  fileGroups = reconcileDefaultDeviceFiles(fileGroups);
+  const allEvents = fileGroups.reduce((acc,g)=> acc.concat(g.events), []);
   const sessions = computeSessionsFromEvents(allEvents);
   logSessions = sessions;
   state.logSessions = sessions.map(s=>({fieldName:s.fieldName, start:s.start.toISOString(), end:s.end.toISOString(), durationMin:s.durationMin, vehicle:s.vehicle||null}));
@@ -2134,6 +2137,47 @@ async function refreshLogsFromFolder(showToast){
 function deviceIdFromLogFilename(name){
   const m = String(name||'').match(/AgOpenGPS_Events_Log-(DESKTOP-[A-Z0-9]+)/i);
   return m ? m[1].toUpperCase() : 'default';
+}
+
+/* Quand plusieurs appareils synchronisent chacun leur "AgOpenGPS_Events_Log.txt"
+   dans le même dossier OneDrive partagé, celui qui "possède" actuellement le
+   nom SANS suffixe n'a aucun marqueur d'appareil dans son nom de fichier :
+   deviceIdFromLogFilename le classe alors dans un tiroir 'default'. Or
+   AgOpenGPS n'écrit aucun identifiant de machine DANS le contenu du log, donc
+   on ne peut pas savoir directement à quel tracteur appartient un fichier
+   'default' — SAUF s'il se trouve être un doublon quasi-parfait (mêmes
+   horodatages, mêmes lignes) d'un fichier d'appareil déjà identifié par son
+   nom : dans ce cas c'est littéralement le même fichier, juste vu sans son
+   suffixe de conflit OneDrive à cet instant. Sans cette réconciliation, son
+   historique d'outils (lignes "Tool loaded"/"Vehicle Loaded") reste invisible
+   pour ce tiroir fantôme 'default', et les sessions les plus récentes (souvent
+   lues depuis ce fichier "courant" sans suffixe) perdent alors leur outil —
+   ce qui donnait l'impression que "tout redevenait vide" après le passage au
+   suivi par appareil. */
+function reconcileDefaultDeviceFiles(fileEventGroups){
+  const named = fileEventGroups.filter(g => g.device !== 'default' && g.events.length);
+  const sigKey = ev => ev.date.getTime()+'|'+ev.type+'|'+(ev.fieldName||ev.vehicle||'');
+  const namedSigSets = named.map(g => ({
+    device: g.device,
+    sig: new Set(g.events.map(sigKey)),
+  }));
+  fileEventGroups.forEach(g=>{
+    if(g.device !== 'default' || !g.events.length) return;
+    let bestDevice = null, bestCount = 0;
+    namedSigSets.forEach(({device, sig})=>{
+      let count = 0;
+      g.events.forEach(ev=>{ if(sig.has(sigKey(ev))) count++; });
+      if(count > bestCount){ bestCount = count; bestDevice = device; }
+    });
+    // On exige que la quasi-totalité des lignes correspondent : sinon ce
+    // n'est pas un doublon, juste un fichier d'un appareil réellement
+    // jamais vu sous un nom suffixé, qu'on laisse en 'default'.
+    if(bestDevice && bestCount >= Math.max(3, Math.ceil(g.events.length*0.8))){
+      g.device = bestDevice;
+      g.events.forEach(ev=> ev.device = bestDevice);
+    }
+  });
+  return fileEventGroups;
 }
 
 function parseAgLogDate(day, monthName, year, hour, minute){
@@ -2259,13 +2303,16 @@ function computeSessionsFromEvents(allEvents){
 }
 
 async function importLogFiles(fileList){
-  let allEvents = [];
+  let fileGroups = [];
   for(const file of fileList){
     try{
       const text = await file.text();
-      allEvents = allEvents.concat(parseAgLogText(text, deviceIdFromLogFilename(file.name)));
+      const deviceId = deviceIdFromLogFilename(file.name);
+      fileGroups.push({device: deviceId, events: parseAgLogText(text, deviceId)});
     }catch(e){ console.error('Erreur lecture log', file.name, e); }
   }
+  fileGroups = reconcileDefaultDeviceFiles(fileGroups);
+  const allEvents = fileGroups.reduce((acc,g)=> acc.concat(g.events), []);
   if(!allEvents.length){
     toast("Aucun événement Opened/Closed trouvé dans ces fichiers.");
     return;

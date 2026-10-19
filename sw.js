@@ -1,4 +1,4 @@
-const CACHE_NAME = 'carnet-de-champs-v2026-10-18-1';
+const CACHE_NAME = 'carnet-de-champs-v2026-10-19-3';
 const APP_SHELL = ['./', './index.html', './manifest.json'];
 
 self.addEventListener('install', (event) => {
