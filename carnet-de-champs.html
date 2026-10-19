@@ -257,7 +257,7 @@
         <span id="odLabel">GitHub non connecté</span>
         <button class="btn ghost small" id="btnGoToGithub">Connexion GitHub</button>
       </div>
-      <span style="font-size:10px;color:#8a9280;">v2026-10-19-1</span>
+      <span style="font-size:10px;color:#8a9280;">v2026-10-19-2</span>
     </div>
   </header>
 
@@ -2100,7 +2100,7 @@ async function refreshLogsFromFolder(showToast){
         try{
           const file = await entry.getFile();
           const text = await file.text();
-          allEvents = allEvents.concat(parseAgLogText(text));
+          allEvents = allEvents.concat(parseAgLogText(text, deviceIdFromLogFilename(name)));
           filesRead++;
         }catch(e){ console.error('Erreur lecture', name, e); }
       }
@@ -2123,6 +2123,19 @@ async function refreshLogsFromFolder(showToast){
 }
 
 
+/* Identifie l'appareil (tablette/PC, donc indirectement le tracteur) qui a
+   produit un fichier de log, à partir de son nom. Quand plusieurs appareils
+   synchronisent chacun leur propre "AgOpenGPS_Events_Log.txt" dans le même
+   dossier OneDrive partagé, le nom de la machine ("DESKTOP-XXXX") est ajouté
+   pour distinguer les copies en conflit — c'est ce qui permet de savoir
+   quels fichiers viennent de tracteurs différents. Le numéro de rotation
+   ("-12", "-29"...) est ignoré : il ne change pas d'appareil, juste de
+   génération du même fichier. */
+function deviceIdFromLogFilename(name){
+  const m = String(name||'').match(/AgOpenGPS_Events_Log-(DESKTOP-[A-Z0-9]+)/i);
+  return m ? m[1].toUpperCase() : 'default';
+}
+
 function parseAgLogDate(day, monthName, year, hour, minute){
   const m = AOG_MONTHS.indexOf(monthName);
   if(m === -1) return null;
@@ -2144,8 +2157,14 @@ function parseAgLogDate(day, monthName, year, hour, minute){
    complète : on ancre la date courante sur les lignes "Program Started" et
    "Opened/Closed" (qui portent une date complète), et on la fait avancer d'un
    jour si une ligne ultérieure semble reculer dans le temps (passage de
-   minuit sans redémarrage du programme). */
-function parseAgLogText(text){
+   minuit sans redémarrage du programme).
+   Chaque événement est aussi marqué de l'appareil (deviceId) dont vient le
+   fichier : Ludovic fait tourner plusieurs tracteurs/tablettes en même
+   temps, donc "le dernier outil chargé" doit être suivi PAR appareil dans
+   computeSessionsFromEvents — sinon un changement d'outil sur le tracteur B
+   écraserait à tort l'outil en cours sur le tracteur A dans le calcul. */
+function parseAgLogText(text, deviceId){
+  deviceId = deviceId || 'default';
   const events = [];
   const lines = text.split(/\r\n|\r|\n/);
   let anchorY=null, anchorM=null, anchorD=null;
@@ -2174,7 +2193,7 @@ function parseAgLogText(text){
     if(vMatch && tMatch){
       const dt = resolveTimestamp(tMatch[1], tMatch[2], tMatch[3]);
       if(dt){
-        events.push({type:'vehicle', vehicle: vMatch[1].trim().replace(/\.(xml)$/i, ''), date: dt});
+        events.push({type:'vehicle', vehicle: vMatch[1].trim().replace(/\.(xml)$/i, ''), date: dt, device: deviceId});
         lastTimestamp = dt;
       }
     }
@@ -2189,6 +2208,7 @@ function parseAgLogText(text){
           type: /opened/i.test(kind) ? 'open' : 'close',
           fieldName: fieldName.trim(),
           date: dt,
+          device: deviceId,
         });
         lastTimestamp = dt;
       }
@@ -2204,15 +2224,19 @@ function computeSessionsFromEvents(allEvents){
   allEvents.sort((a,b)=> a.date - b.date);
   const openTimes = {}; // fieldName (lowercase) -> Date d'ouverture en cours
   const sessions = [];
-  let currentVehicle = null;
+  // un outil courant par appareil (tracteur/tablette), pas une seule valeur
+  // globale : plusieurs tracteurs tournent en parallèle, chacun avec son
+  // propre outil, donc un changement sur l'un ne doit jamais écraser celui
+  // des autres.
+  const currentVehicleByDevice = {};
   allEvents.forEach(ev=>{
     if(ev.type === 'vehicle'){
-      currentVehicle = ev.vehicle;
+      currentVehicleByDevice[ev.device] = ev.vehicle;
       return;
     }
     const key = ev.fieldName.toLowerCase();
     if(ev.type === 'open'){
-      openTimes[key] = {name: ev.fieldName, date: ev.date, vehicle: currentVehicle};
+      openTimes[key] = {name: ev.fieldName, date: ev.date, vehicle: currentVehicleByDevice[ev.device] || null};
     } else {
       const open = openTimes[key];
       if(open){
@@ -2223,7 +2247,7 @@ function computeSessionsFromEvents(allEvents){
             start: open.date,
             end: ev.date,
             durationMin,
-            vehicle: open.vehicle || currentVehicle || null,
+            vehicle: open.vehicle || null,
           });
         }
         delete openTimes[key];
@@ -2239,7 +2263,7 @@ async function importLogFiles(fileList){
   for(const file of fileList){
     try{
       const text = await file.text();
-      allEvents = allEvents.concat(parseAgLogText(text));
+      allEvents = allEvents.concat(parseAgLogText(text, deviceIdFromLogFilename(file.name)));
     }catch(e){ console.error('Erreur lecture log', file.name, e); }
   }
   if(!allEvents.length){
